@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #234255;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 0.25rem;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 2rem;
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            margin: 1rem;
+            padding: 1rem;
+            width: 300px;
+        }
+
+        .card h2 {
+            font-size: 1.5rem;
+            margin-top: 0;
+        }
+
+        .card p {
+            margin: 0.5rem 0;
+        }
+
+        .progress {
+            width: 100%;
+            height: 20px;
+            background-color: #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: #4CAF50;
+            text-align: center;
+            color: white;
+            line-height: 20px;
+            white-space: nowrap;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <header>
+            <h1>List of running node containers</h1>
+        </header>
+        <div class="container">
+            <div class="card" v-for="container in containers" :key="container.ID">
+                <h2>{{ container.Name }}</h2>
+                <p><strong>ID:</strong> {{ container.ID }}</p>
+                <p><strong>Image:</strong> {{ container.Image }}</p>
+                <p><strong>tag|commit:</strong> {{ container.TagCommit }}</p>
+                <p><strong>create image:</strong> {{ container.ImageCreatedAt }}</p>
+                <p><strong>create container:</strong> {{ container.CreatedAt }}</p>
+                <p><strong>uptime container:</strong> {{ container.Uptime }}</p>
+                <p><strong>status:</strong> {{ container.State }}</p>
+                <p><strong>running:</strong> {{ container.Run }}</p>
+                <p><strong>restart:</strong> {{ container.Restart }}</p>
+                <div>
+                    <strong>Labels:</strong>
+                    <ul>
+                        <li v-for="(value, key) in container.Labels" :key="key"><strong>{{ key }}:</strong> {{ value }}</li>
+                    </ul>
+                </div>
+                <p><strong>RAM usage:</strong></p>
+                <div class="progress">
+                    <div class="progress-bar" :style="{ width: container.RAMUsage }">{{ container.RAMUsage }}</div>
+                </div>
+                <p><strong>CPU usage:</strong></p>
+                <div class="progress">
+                    <div class="progress-bar" :style="{ width: container.CPUUsage }">{{ container.CPUUsage }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.26/dist/vue.global.prod.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@0.24.0/dist/axios.min.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    containers: []
+                };
+            },
+            mounted() {
+                axios.get('/api/containers')
+                    .then(response => {
+                        this.containers = response.data;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching containers:', error);
+                    });
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
