@@ -1,7 +1,7 @@
 package containers
 
 import (
-	"fmt"
+	// "fmt"
 	"os"
 	"strings"
 	"time"
@@ -18,11 +18,12 @@ type Container struct {
 	CreatedAt     string
 	Uptime        string
 	State         string
+	Health        string
 	Run           bool
 	Restart       bool
-	RAMUsage      string
-	CPUUsage      string
-	ContainerSize string
+	// RAMUsage      string
+	// CPUUsage      string
+	// ContainerSize string
 	Labels        map[string]string
 }
 
@@ -55,23 +56,23 @@ func GetContainers() ([]Container, error) {
 			return nil, err
 		}
 
-		statsChan := make(chan *docker.Stats)
-		done := make(chan bool)
-		go func() {
-			client.Stats(docker.StatsOptions{
-				ID:     c.ID,
-				Stats:  statsChan,
-				Stream: false,
-				Done:   done,
-			})
-		}()
+		// statsChan := make(chan *docker.Stats)
+		// done := make(chan bool)
+		// go func() {
+		// 	client.Stats(docker.StatsOptions{
+		// 		ID:     c.ID,
+		// 		Stats:  statsChan,
+		// 		Stream: false,
+		// 		Done:   done,
+		// 	})
+		// }()
 
-		stats := <-statsChan
-		close(done)
+		// stats := <-statsChan
+		// close(done)
 
-		ramUsage := fmt.Sprintf("%.2f MiB", float64(stats.MemoryStats.Usage)/1024/1024)
-		cpuUsage := fmt.Sprintf("%.2f%%", calculateCPUPercent(stats))
-		containerSize := fmt.Sprintf("%v MiB", containerInfo.SizeRootFs/1024/1024)
+		// ramUsage := fmt.Sprintf("%.2f MiB", float64(stats.MemoryStats.Usage)/1024/1024)
+		// cpuUsage := fmt.Sprintf("%.2f%%", calculateCPUPercent(stats))
+		// containerSize := fmt.Sprintf("%v MiB", containerInfo.SizeRootFs/1024/1024)
 
 		container := Container{
 			Name:          strings.TrimLeft(c.Names[0], "/"),
@@ -82,11 +83,12 @@ func GetContainers() ([]Container, error) {
 			CreatedAt:     containerInfo.Created.Format(time.RFC3339),
 			Uptime:        calculateUptime(containerInfo.Created),
 			State:         containerInfo.State.String(),
+			Health:        containerInfo.State.Health.Status,
 			Run:           containerInfo.State.Running,
 			Restart:       containerInfo.State.Restarting,
-			RAMUsage:      ramUsage,
-			CPUUsage:      cpuUsage,
-			ContainerSize: containerSize,
+			// RAMUsage:      ramUsage,
+			// CPUUsage:      cpuUsage,
+			// ContainerSize: containerSize,
 			Labels:        filterLabels(imageInfo.Config.Labels, prefix),
 		}
 		result = append(result, container)
