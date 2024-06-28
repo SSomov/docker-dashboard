@@ -112,7 +112,7 @@
                 };
             },
             mounted() {
-                axios.get('/api/containers')
+                axios.get('api/containers')
                     .then(response => {
                         this.containers = response.data;
                     })
