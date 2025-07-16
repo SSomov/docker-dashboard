@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"docker-dashboard/internal/api"
 
@@ -11,14 +12,21 @@ import (
 )
 
 func main() {
-	r := mux.NewRouter()
-	api.RegisterRoutes(r)
+	for {
+		r := mux.NewRouter()
+		api.RegisterRoutes(r)
 
-	// Serve static files from the "web/public" directory
-	staticDir := filepath.Join("web", "public")
-	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(staticDir))))
+		// Serve static files from the "web/public" directory
+		staticDir := filepath.Join("web", "public")
+		r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(staticDir))))
 
-	fmt.Println("Server started at http://localhost:8080")
-	http.ListenAndServe(":8080", r)
+		addr := ":8080"
+		log.Printf("Server started at http://localhost%s", addr)
+		err := http.ListenAndServe(addr, r)
+		if err != nil {
+			log.Printf("Server error: %v", err)
+		}
+		log.Println("Restarting server in 10 seconds...")
+		time.Sleep(10 * time.Second)
+	}
 }
-

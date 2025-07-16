@@ -19,7 +19,7 @@ func RegisterRoutes(r *mux.Router) {
 func getContainersHandler(w http.ResponseWriter, r *http.Request) {
 	containers, err := containers.GetContainers()
 	if err != nil {
-		http.Error(w, "Failed to get containers", http.StatusInternalServerError)
+		http.Error(w, "Failed to get containers: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

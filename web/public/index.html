@@ -197,6 +197,20 @@
                 <p><strong>health:</strong> {{ container.Health }}</p>
                 <p><strong>running:</strong> {{ container.Run }}</p>
                 <p><strong>restart:</strong> {{ container.Restart }}</p>
+                <p><strong>CPU:</strong> {{ container.CPU.toFixed(1) }}%
+                  <div class="mini-progress">
+                    <div class="mini-progress-bar cpu" :style="{ width: (container.CPU > 100 ? 100 : container.CPU) + '%' }"></div>
+                  </div>
+                </p>
+                <p><strong>RAM:</strong>
+                  {{ (container.RAM / 1024 / 1024).toFixed(1) }} / {{ (container.RAM_LIMIT ? container.RAM_LIMIT / 1024 / 1024 : 512).toFixed(1) }} MiB
+                  ({{ ((container.RAM / (container.RAM_LIMIT ? container.RAM_LIMIT : 512 * 1024 * 1024)) * 100).toFixed(1) }}%)
+                  <div class="mini-progress">
+                    <div class="mini-progress-bar ram"
+                      :style="{ width: ((container.RAM / (container.RAM_LIMIT ? container.RAM_LIMIT : 512 * 1024 * 1024)) * 100 > 100 ? 100 : (container.RAM / (container.RAM_LIMIT ? container.RAM_LIMIT : 512 * 1024 * 1024)) * 100) + '%' }">
+                    </div>
+                  </div>
+                </p>
                 <div>
                     <strong>Labels:</strong>
                     <ul>
