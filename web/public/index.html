@@ -85,6 +85,56 @@
             align-items: center;
             height: 100vh;
         }
+        .metrics-bar {
+            display: flex;
+            flex-direction: column;
+            flex-wrap: wrap;
+            gap: 0.2rem;
+            background: #3a5a6a;
+            color: #fff;
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            justify-content: center;
+            align-items: center;
+        }
+        .metrics-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            justify-content: center;
+            align-items: center;
+        }
+        .metrics-bar span {
+            margin: 0 0.5rem;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+        }
+        .mini-progress {
+            width: 70px;
+            height: 10px;
+            background-color: #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-left: 0.5em;
+            display: inline-block;
+        }
+        .mini-progress-bar {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        .mini-progress-bar.cpu {
+            background-color: #ff9800;
+        }
+        .mini-progress-bar.ram {
+            background-color: #4caf50;
+        }
+        .mini-progress-bar.swap {
+            background-color: #2196f3;
+        }
+        .mini-progress-bar.disk {
+            background-color: #9c27b0;
+        }
     </style>
 </head>
 
@@ -93,20 +143,39 @@
         <header>
             <h1>List of running node containers</h1>
         </header>
-        <!-- Секция для системных метрик -->
-        <div class="card" v-if="hostinfo">
-            <h2>System Metrics</h2>
-            <p><strong>CPU Usage:</strong> {{ hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0].toFixed(1) : 0 }}%</p>
-            <div class="progress">
-                <div class="progress-bar" :style="{ width: (hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0] : 0) + '%' }">
-                    {{ hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0].toFixed(1) : 0 }}%
-                </div>
+        <div class="metrics-bar" v-if="hostinfo">
+            <div class="metrics-row">
+                <span><b>Host:</b> {{ hostinfo.host.hostname }}</span>
+                <span><b>Uptime:</b> {{ (hostinfo.host.uptime / 3600).toFixed(1) }}h</span>
+                <span><b>CPU:</b> {{ hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0].toFixed(1) : 0 }}%
+                    <div class="mini-progress">
+                        <div class="mini-progress-bar cpu" :style="{ width: (hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0] : 0) + '%' }"></div>
+                    </div>
+                </span>
+                <span><b>Load:</b> {{ hostinfo.load ? hostinfo.load.load1.toFixed(2) : '-' }}/{{ hostinfo.load ? hostinfo.load.load5.toFixed(2) : '-' }}/{{ hostinfo.load ? hostinfo.load.load15.toFixed(2) : '-' }}</span>
             </div>
-            <p><strong>RAM Usage:</strong> {{ (hostinfo.memory.used / 1024 / 1024).toFixed(1) }} MiB / {{ (hostinfo.memory.total / 1024 / 1024).toFixed(1) }} MiB ({{ hostinfo.memory.used && hostinfo.memory.total ? ((hostinfo.memory.used / hostinfo.memory.total) * 100).toFixed(1) : 0 }}%)</p>
-            <div class="progress">
-                <div class="progress-bar" :style="{ width: (hostinfo.memory.used && hostinfo.memory.total ? (hostinfo.memory.used / hostinfo.memory.total * 100) : 0) + '%' }">
-                    {{ hostinfo.memory.used && hostinfo.memory.total ? ((hostinfo.memory.used / hostinfo.memory.total) * 100).toFixed(1) : 0 }}%
-                </div>
+            <div class="metrics-row">
+                <span><b>RAM:</b> {{ (hostinfo.memory.used / 1024 / 1024).toFixed(1) }} / {{ (hostinfo.memory.total / 1024 / 1024).toFixed(1) }} MiB ({{ hostinfo.memory.used && hostinfo.memory.total ? ((hostinfo.memory.used / hostinfo.memory.total) * 100).toFixed(1) : 0 }}%)
+                    <div class="mini-progress">
+                        <div class="mini-progress-bar ram" :style="{ width: (hostinfo.memory.used && hostinfo.memory.total ? (hostinfo.memory.used / hostinfo.memory.total * 100) : 0) + '%' }"></div>
+                    </div>
+                </span>
+                <span><b>Swap:</b>
+                    <template v-if="hostinfo.memory && hostinfo.memory.swapTotal > 0">
+                        {{ ((hostinfo.memory.swapTotal - hostinfo.memory.swapFree) / 1024 / 1024).toFixed(2) }} / {{ (hostinfo.memory.swapTotal / 1024 / 1024).toFixed(2) }} MiB ({{ ((hostinfo.memory.swapTotal - hostinfo.memory.swapFree) / hostinfo.memory.swapTotal * 100).toFixed(1) }}%)
+                        <div class="mini-progress">
+                            <div class="mini-progress-bar swap" :style="{ width: (((hostinfo.memory.swapTotal - hostinfo.memory.swapFree) / hostinfo.memory.swapTotal) * 100).toFixed(1) + '%' }"></div>
+                        </div>
+                    </template>
+                    <template v-else>no swap</template>
+                </span>
+                <span><b>Disk:</b> <template v-if="totalDisk.total > 0">{{ (totalDisk.used / 1024 / 1024 / 1024).toFixed(2) }} / {{ (totalDisk.total / 1024 / 1024 / 1024).toFixed(2) }} GiB ({{ (totalDisk.used / totalDisk.total * 100).toFixed(1) }}%)
+                    <div class="mini-progress">
+                        <div class="mini-progress-bar disk" :style="{ width: (totalDisk.used / totalDisk.total * 100) + '%' }"></div>
+                    </div>
+                </template></span>
+                <span><b>I/O:</b> <template v-if="hostinfo.disk_usage && hostinfo.disk_usage['/']">R {{ (hostinfo.disk_usage['/'].readBytes ? hostinfo.disk_usage['/'].readBytes / 1024 / 1024 : 0).toFixed(2) }} MiB, W {{ (hostinfo.disk_usage['/'].writeBytes ? hostinfo.disk_usage['/'].writeBytes / 1024 / 1024 : 0).toFixed(2) }} MiB</template></span>
+                <span><b>Net:</b> <template v-if="hostinfo.net && hostinfo.net.length">RX {{ (hostinfo.net[0].bytesRecv ? hostinfo.net[0].bytesRecv / 1024 / 1024 : 0).toFixed(2) }} MiB, TX {{ (hostinfo.net[0].bytesSent ? hostinfo.net[0].bytesSent / 1024 / 1024 : 0).toFixed(2) }} MiB</template></span>
             </div>
         </div>
         <!-- /Секция для системных метрик -->
@@ -149,6 +218,18 @@
                     loading: true,
                     hostinfo: null
                 };
+            },
+            computed: {
+                totalDisk() {
+                    if (!this.hostinfo || !this.hostinfo.disk_usage) return { used: 0, total: 0 };
+                    let used = 0, total = 0;
+                    for (const mount in this.hostinfo.disk_usage) {
+                        const usage = this.hostinfo.disk_usage[mount];
+                        used += usage.used;
+                        total += usage.total;
+                    }
+                    return { used, total };
+                }
             },
             mounted() {
                 this.fetchContainers();

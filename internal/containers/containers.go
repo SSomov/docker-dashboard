@@ -120,15 +120,15 @@ func getTagCommit(fullName string) string {
 	return ""
 }
 
-func calculateCPUPercent(stats *docker.Stats) float64 {
-	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
-	systemDelta := float64(stats.CPUStats.SystemCPUUsage - stats.PreCPUStats.SystemCPUUsage)
-	numberCPUs := float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
-	if systemDelta > 0.0 && cpuDelta > 0.0 {
-		return (cpuDelta / systemDelta) * numberCPUs * 100.0
-	}
-	return 0.0
-}
+// func calculateCPUPercent(stats *docker.Stats) float64 {
+// 	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
+// 	systemDelta := float64(stats.CPUStats.SystemCPUUsage - stats.PreCPUStats.SystemCPUUsage)
+// 	numberCPUs := float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+// 	if systemDelta > 0.0 && cpuDelta > 0.0 {
+// 		return (cpuDelta / systemDelta) * numberCPUs * 100.0
+// 	}
+// 	return 0.0
+// }
 
 func calculateUptime(createdAt time.Time) string {
 	uptime := time.Since(createdAt)
