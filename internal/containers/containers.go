@@ -10,21 +10,21 @@ import (
 )
 
 type Container struct {
-	Name          string
-	ID            string
-	Image         string
-	TagCommit     string
+	Name           string
+	ID             string
+	Image          string
+	TagCommit      string
 	ImageCreatedAt string
-	CreatedAt     string
-	Uptime        string
-	State         string
-	Health        string
-	Run           bool
-	Restart       bool
+	CreatedAt      string
+	Uptime         string
+	State          string
+	Health         string
+	Run            bool
+	Restart        bool
 	// RAMUsage      string
 	// CPUUsage      string
 	// ContainerSize string
-	Labels        map[string]string
+	Labels map[string]string
 }
 
 func GetContainers() ([]Container, error) {
@@ -75,21 +75,21 @@ func GetContainers() ([]Container, error) {
 		// containerSize := fmt.Sprintf("%v MiB", containerInfo.SizeRootFs/1024/1024)
 
 		container := Container{
-			Name:          strings.TrimLeft(c.Names[0], "/"),
-			ID:            c.ID[:12],
-			Image:         getImageName(c.Image),
-			TagCommit:     getTagCommit(c.Image),
+			Name:           strings.TrimLeft(c.Names[0], "/"),
+			ID:             c.ID[:12],
+			Image:          getImageName(c.Image),
+			TagCommit:      getTagCommit(c.Image),
 			ImageCreatedAt: imageInfo.Created.Format(time.RFC3339),
-			CreatedAt:     containerInfo.Created.Format(time.RFC3339),
-			Uptime:        calculateUptime(containerInfo.Created),
-			State:         containerInfo.State.String(),
-			Health:        containerInfo.State.Health.Status,
-			Run:           containerInfo.State.Running,
-			Restart:       containerInfo.State.Restarting,
+			CreatedAt:      containerInfo.Created.Format(time.RFC3339),
+			Uptime:         calculateUptime(containerInfo.Created),
+			State:          containerInfo.State.String(),
+			Health:         containerInfo.State.Health.Status,
+			Run:            containerInfo.State.Running,
+			Restart:        containerInfo.State.Restarting,
 			// RAMUsage:      ramUsage,
 			// CPUUsage:      cpuUsage,
 			// ContainerSize: containerSize,
-			Labels:        filterLabels(imageInfo.Config.Labels, prefix),
+			Labels: filterLabels(imageInfo.Config.Labels, prefix),
 		}
 		result = append(result, container)
 	}
@@ -134,4 +134,3 @@ func calculateUptime(createdAt time.Time) string {
 	uptime := time.Since(createdAt)
 	return uptime.Round(time.Second).String()
 }
-

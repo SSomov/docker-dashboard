@@ -93,6 +93,23 @@
         <header>
             <h1>List of running node containers</h1>
         </header>
+        <!-- Секция для системных метрик -->
+        <div class="card" v-if="hostinfo">
+            <h2>System Metrics</h2>
+            <p><strong>CPU Usage:</strong> {{ hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0].toFixed(1) : 0 }}%</p>
+            <div class="progress">
+                <div class="progress-bar" :style="{ width: (hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0] : 0) + '%' }">
+                    {{ hostinfo.cpu && hostinfo.cpu.length ? hostinfo.cpu[0].toFixed(1) : 0 }}%
+                </div>
+            </div>
+            <p><strong>RAM Usage:</strong> {{ (hostinfo.memory.used / 1024 / 1024).toFixed(1) }} MiB / {{ (hostinfo.memory.total / 1024 / 1024).toFixed(1) }} MiB ({{ hostinfo.memory.used && hostinfo.memory.total ? ((hostinfo.memory.used / hostinfo.memory.total) * 100).toFixed(1) : 0 }}%)</p>
+            <div class="progress">
+                <div class="progress-bar" :style="{ width: (hostinfo.memory.used && hostinfo.memory.total ? (hostinfo.memory.used / hostinfo.memory.total * 100) : 0) + '%' }">
+                    {{ hostinfo.memory.used && hostinfo.memory.total ? ((hostinfo.memory.used / hostinfo.memory.total) * 100).toFixed(1) : 0 }}%
+                </div>
+            </div>
+        </div>
+        <!-- /Секция для системных метрик -->
         <div class="container" v-if="loading">
             <div class="loader-container">
                 <div class="loader"></div>
@@ -117,14 +134,6 @@
                         <li v-for="(value, key) in container.Labels" :key="key"><strong>{{ key }}:</strong> {{ value }}</li>
                     </ul>
                 </div>
-                <!-- <p><strong>RAM usage:</strong></p>
-                <div class="progress">
-                    <div class="progress-bar" :style="{ width: container.RAMUsage }">{{ container.RAMUsage }}</div>
-                </div>
-                <p><strong>CPU usage:</strong></p>
-                <div class="progress">
-                    <div class="progress-bar" :style="{ width: container.CPUUsage }">{{ container.CPUUsage }}</div>
-                </div> -->
             </div>
         </div>
     </div>
@@ -137,11 +146,13 @@
             data() {
                 return {
                     containers: [],
-                    loading: true
+                    loading: true,
+                    hostinfo: null
                 };
             },
             mounted() {
                 this.fetchContainers();
+                this.fetchHostInfo();
             },
             methods: {
                 fetchContainers() {
@@ -156,6 +167,18 @@
                             console.error('Error fetching containers:', error);
                             this.loading = false;
                             setTimeout(this.fetchContainers, 5000);
+                        });
+                },
+                fetchHostInfo() {
+                    const baseUrl = `${window.location.origin}${window.location.pathname}`;
+                    axios.get(`${baseUrl}/api/hostinfo`)
+                        .then(response => {
+                            this.hostinfo = response.data;
+                            setTimeout(this.fetchHostInfo, 5000);
+                        })
+                        .catch(error => {
+                            console.error('Error fetching hostinfo:', error);
+                            setTimeout(this.fetchHostInfo, 5000);
                         });
                 }
             }
