@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -91,6 +92,10 @@ type dockerStats struct {
 }
 
 func GetContainers() ([]Container, error) {
+	debug := false
+	if os.Getenv("DEBUG") == "true" {
+		debug = true
+	}
 	log.Println("[docker-dashboard] GetContainers: start (net/http raw)")
 	tr := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -112,7 +117,9 @@ func GetContainers() ([]Container, error) {
 		log.Printf("[docker-dashboard] read body error: %v", err)
 		return nil, err
 	}
-	log.Printf("[docker-dashboard] raw body: %s", string(body))
+	if debug {
+		log.Printf("[docker-dashboard] raw body: %s", string(body))
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("docker API status %d", resp.StatusCode)
 	}
