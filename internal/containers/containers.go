@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -112,7 +113,7 @@ func GetContainers() ([]Container, error) {
 	}
 	defer resp.Body.Close()
 	log.Printf("[docker-dashboard] status: %d", resp.StatusCode)
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("[docker-dashboard] read body error: %v", err)
 		return nil, err
@@ -233,7 +234,7 @@ func GetContainers() ([]Container, error) {
 		statsURL := fmt.Sprintf("http://unix/containers/%s/stats?stream=false", c.ID)
 		statsResp, err := client.Get(statsURL)
 		if err == nil {
-			statsBody, err := ioutil.ReadAll(statsResp.Body)
+			statsBody, err := io.ReadAll(statsResp.Body)
 			statsResp.Body.Close()
 			if err == nil {
 				var stats dockerStats
