@@ -19,6 +19,12 @@
   let wsLogs = null;
   let logsContainerRef = null;
   let autoScrollEnabled = true;
+  
+  // Высота статичных элементов
+  let headerHeight = 0;
+  let metricsBarHeight = 0;
+  let filterBarHeight = 0;
+  let totalFixedHeight = 0;
 
   $: totalDisk = (() => {
     if (!hostinfo || !hostinfo.disk_usage) return { used: 0, total: 0 };
@@ -33,8 +39,17 @@
 
   function formatTime(dateString) {
     if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid date:', dateString);
+        return '';
+      }
+      return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch (error) {
+      console.error('Error formatting time:', error, dateString);
+      return '';
+    }
   }
 
   function connectWebSocket() {
@@ -221,7 +236,37 @@
     connectWebSocket();
     connectHostInfoWebSocket();
     window.addEventListener('keydown', handleEscapeKey);
+    
+    // Вычисляем высоту статичных элементов
+    const updateFixedHeights = () => {
+      const headerEl = document.querySelector('header');
+      const metricsBarEl = document.querySelector('.metrics-bar');
+      const filterBarEl = document.querySelector('.filter-bar');
+      
+      headerHeight = headerEl ? headerEl.offsetHeight : 0;
+      metricsBarHeight = metricsBarEl ? metricsBarEl.offsetHeight : 0;
+      filterBarHeight = filterBarEl ? filterBarEl.offsetHeight : 0;
+      totalFixedHeight = headerHeight + metricsBarHeight + filterBarHeight;
+    };
+    
+    updateFixedHeights();
+    // Обновляем при изменении размеров окна
+    window.addEventListener('resize', updateFixedHeights);
   });
+  
+  // Обновляем высоту при изменении hostinfo (может измениться высота metrics-bar)
+  $: if (hostinfo) {
+    setTimeout(() => {
+      const headerEl = document.querySelector('header');
+      const metricsBarEl = document.querySelector('.metrics-bar');
+      const filterBarEl = document.querySelector('.filter-bar');
+      
+      if (headerEl) headerHeight = headerEl.offsetHeight;
+      if (metricsBarEl) metricsBarHeight = metricsBarEl.offsetHeight;
+      if (filterBarEl) filterBarHeight = filterBarEl.offsetHeight;
+      totalFixedHeight = headerHeight + metricsBarHeight + filterBarHeight;
+    }, 100);
+  }
 
   onDestroy(() => {
     if (ws) {
@@ -284,9 +329,40 @@
   header {
     background-color: #4CAF50;
     color: white;
-    padding: 0.25rem;
-    text-align: center;
+    padding: 0.4rem 1rem;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.75rem;
   }
+
+  header h1 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .logo {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+  }
+
+  .scrollable-content {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
 
   .container {
     display: flex;
@@ -487,6 +563,10 @@
     padding: 0.75rem 1.5rem;
     font-size: 0.95rem;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 99;
   }
 
   .metrics-header {
@@ -575,6 +655,10 @@
     align-items: center;
     gap: 1rem;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 99;
   }
 
   .filter-bar label {
@@ -634,12 +718,18 @@
   }
 </style>
 
-<header>
-  <h1>List of running node containers</h1>
-</header>
+<div class="scrollable-content">
+  <header>
+    <svg class="logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor"/>
+      <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <h1>CoreOps Dashboard</h1>
+  </header>
 
-{#if hostinfo}
-  <div class="metrics-bar">
+  {#if hostinfo}
+    <div class="metrics-bar" style="top: {headerHeight}px">
     <div class="metrics-header">
       <div class="metrics-header-left">
         <span><b>Host:</b> {hostinfo.host.hostname}</span>
@@ -647,8 +737,8 @@
       </div>
       <div class="metrics-header-right">
         {#if containersData}
-          <span><b>Containers:</b> {containersData.total}</span>
-          <span><b>Snapshot:</b> {formatTime(containersData.snapshot_time)}</span>
+          <span><b>Containers:</b> {containersData.total || 0}</span>
+          <span><b>Snapshot:</b> {containersData.snapshot_time ? formatTime(containersData.snapshot_time) : '-'}</span>
         {/if}
       </div>
     </div>
@@ -711,27 +801,28 @@
         {/if}
       </span>
     </div>
-  </div>
-{/if}
-
-<div class="filter-bar">
-  <label for="container-filter">Filter:</label>
-  <input
-    id="container-filter"
-    type="text"
-    placeholder="Filter containers by name..."
-    bind:value={filterText}
-  />
-</div>
-
-{#if loading}
-  <div class="container">
-    <div class="loader-container">
-      <div class="loader"></div>
     </div>
+  {/if}
+
+  <div class="filter-bar" style="top: {headerHeight + metricsBarHeight}px">
+    <label for="container-filter">Filter:</label>
+    <input
+      id="container-filter"
+      type="text"
+      placeholder="Filter containers by name..."
+      bind:value={filterText}
+    />
   </div>
-{:else}
-  <div class="container">
+
+  <div class="content-wrapper" style="padding-top: {totalFixedHeight}px">
+    {#if loading}
+      <div class="container">
+        <div class="loader-container">
+          <div class="loader"></div>
+        </div>
+      </div>
+    {:else}
+      <div class="container">
     {#each filteredGroups as group (group.project_name || 'ungrouped')}
       <div class="container-group">
         {#if group.project_name}
@@ -772,9 +863,11 @@
           {/each}
         </div>
       </div>
-    {/each}
+      {/each}
+    </div>
+  {/if}
   </div>
-{/if}
+</div>
 
 <!-- Модальное окно для логов -->
 {#if logsModalOpen}
