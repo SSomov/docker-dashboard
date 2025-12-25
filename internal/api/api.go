@@ -25,6 +25,8 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/ws/containers", containersWebSocketHandler)
 	// Новый эндпоинт для системных метрик
 	r.HandleFunc("/api/hostinfo", getHostInfoHandler).Methods("GET")
+	// WebSocket эндпоинт для hostinfo
+	r.HandleFunc("/ws/hostinfo", hostinfoWebSocketHandler)
 }
 
 type containersResponse struct {
@@ -99,4 +101,39 @@ func getHostInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(metrics)
+}
+
+func hostinfoWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// Отправляем данные сразу при подключении
+	sendHostInfoData(conn)
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := sendHostInfoData(conn); err != nil {
+				log.Printf("WebSocket write error: %v", err)
+				return
+			}
+		}
+	}
+}
+
+func sendHostInfoData(conn *websocket.Conn) error {
+	metrics, err := hostinfo.GetSystemMetrics()
+	if err != nil {
+		log.Printf("Failed to get hostinfo: %v", err)
+		return err
+	}
+
+	return conn.WriteJSON(metrics)
 }

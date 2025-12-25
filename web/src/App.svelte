@@ -1,12 +1,12 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import axios from 'axios';
 
   let containers = [];
   let containersData = null;
   let loading = true;
   let hostinfo = null;
   let ws = null;
+  let wsHostInfo = null;
 
   $: totalDisk = (() => {
     if (!hostinfo || !hostinfo.disk_usage) return { used: 0, total: 0 };
@@ -18,10 +18,6 @@
     }
     return { used, total };
   })();
-
-  function getBaseUrl() {
-    return `${window.location.origin}${window.location.pathname}`;
-  }
 
   function formatTime(dateString) {
     if (!dateString) return '';
@@ -64,26 +60,46 @@
     };
   }
 
-  function fetchHostInfo() {
-    axios.get(`${getBaseUrl()}/api/hostinfo`)
-      .then(response => {
-        hostinfo = response.data;
-        setTimeout(fetchHostInfo, 2000);
-      })
-      .catch(error => {
-        console.error('Error fetching hostinfo:', error);
-        setTimeout(fetchHostInfo, 5000);
-      });
+  function connectHostInfoWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/hostinfo`;
+    
+    wsHostInfo = new WebSocket(wsUrl);
+
+    wsHostInfo.onopen = () => {
+      console.log('HostInfo WebSocket connected');
+    };
+
+    wsHostInfo.onmessage = (event) => {
+      try {
+        hostinfo = JSON.parse(event.data);
+      } catch (error) {
+        console.error('Error parsing hostinfo WebSocket message:', error);
+      }
+    };
+
+    wsHostInfo.onerror = (error) => {
+      console.error('HostInfo WebSocket error:', error);
+    };
+
+    wsHostInfo.onclose = () => {
+      console.log('HostInfo WebSocket disconnected, reconnecting...');
+      // Переподключение через 2 секунды
+      setTimeout(connectHostInfoWebSocket, 2000);
+    };
   }
 
   onMount(() => {
     connectWebSocket();
-    fetchHostInfo();
+    connectHostInfoWebSocket();
   });
 
   onDestroy(() => {
     if (ws) {
       ws.close();
+    }
+    if (wsHostInfo) {
+      wsHostInfo.close();
     }
   });
 
