@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"docker-dashboard/internal/containers"
@@ -29,10 +30,73 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/ws/hostinfo", hostinfoWebSocketHandler)
 }
 
+type containerGroup struct {
+	ProjectName string                `json:"project_name,omitempty"`
+	Containers  []containers.Container `json:"containers"`
+}
+
 type containersResponse struct {
-	SnapshotTime time.Time            `json:"snapshot_time"`
-	Total        int                  `json:"total"`
-	Containers   []containers.Container `json:"containers"`
+	SnapshotTime time.Time         `json:"snapshot_time"`
+	Total        int               `json:"total"`
+	Containers   []containers.Container `json:"containers"` // Для обратной совместимости
+	Groups       []containerGroup  `json:"groups"`
+}
+
+func groupContainers(containerList []containers.Container) []containerGroup {
+	groupsMap := make(map[string][]containers.Container)
+	var ungrouped []containers.Container
+
+	for _, container := range containerList {
+		if container.ComposeProject != "" {
+			groupsMap[container.ComposeProject] = append(groupsMap[container.ComposeProject], container)
+		} else {
+			ungrouped = append(ungrouped, container)
+		}
+	}
+
+	// Сортируем контейнеры внутри каждой группы по имени
+	for projectName := range groupsMap {
+		sort.Slice(groupsMap[projectName], func(i, j int) bool {
+			return groupsMap[projectName][i].Name < groupsMap[projectName][j].Name
+		})
+	}
+
+	// Сортируем контейнеры без группы по имени
+	if len(ungrouped) > 0 {
+		sort.Slice(ungrouped, func(i, j int) bool {
+			return ungrouped[i].Name < ungrouped[j].Name
+		})
+	}
+
+	// Собираем группы и сортируем их по имени проекта
+	var groups []containerGroup
+	for projectName, containers := range groupsMap {
+		groups = append(groups, containerGroup{
+			ProjectName: projectName,
+			Containers:  containers,
+		})
+	}
+
+	// Сортируем группы по имени проекта (пустые имена идут в конец)
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].ProjectName == "" {
+			return false
+		}
+		if groups[j].ProjectName == "" {
+			return true
+		}
+		return groups[i].ProjectName < groups[j].ProjectName
+	})
+
+	// Добавляем группу без проекта в конец
+	if len(ungrouped) > 0 {
+		groups = append(groups, containerGroup{
+			ProjectName: "",
+			Containers:  ungrouped,
+		})
+	}
+
+	return groups
 }
 
 func getContainersHandler(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +110,7 @@ func getContainersHandler(w http.ResponseWriter, r *http.Request) {
 		SnapshotTime: time.Now(),
 		Total:        len(containerList),
 		Containers:   containerList,
+		Groups:       groupContainers(containerList),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -88,6 +153,7 @@ func sendContainersData(conn *websocket.Conn) error {
 		SnapshotTime: time.Now(),
 		Total:        len(containerList),
 		Containers:   containerList,
+		Groups:       groupContainers(containerList),
 	}
 
 	return conn.WriteJSON(response)

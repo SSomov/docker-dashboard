@@ -28,6 +28,7 @@ type Container struct {
 	Run            bool              `json:"Run"`
 	Restart        bool              `json:"Restart"`
 	Labels         map[string]string `json:"Labels"`
+	ComposeProject string            `json:"ComposeProject,omitempty"`
 }
 
 type dockerAPIContainer struct {
@@ -237,6 +238,14 @@ func GetContainers() ([]Container, error) {
 			}
 			filteredLabels := filterLabels(container.Labels)
 
+			// Извлекаем compose project до фильтрации меток
+			composeProject := ""
+			if container.Labels != nil {
+				if project, ok := container.Labels["com.docker.compose.project"]; ok {
+					composeProject = project
+				}
+			}
+
 			resultChan <- containerResult{
 				container: Container{
 					ID:             shortID,
@@ -251,6 +260,7 @@ func GetContainers() ([]Container, error) {
 					Run:            inspect.State.Running,
 					Restart:        restart,
 					Labels:         filteredLabels,
+					ComposeProject: composeProject,
 				},
 				index: idx,
 			}

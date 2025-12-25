@@ -7,6 +7,8 @@
   let hostinfo = null;
   let ws = null;
   let wsHostInfo = null;
+  let containerGroups = [];
+  let filterText = '';
 
   $: totalDisk = (() => {
     if (!hostinfo || !hostinfo.disk_usage) return { used: 0, total: 0 };
@@ -41,6 +43,16 @@
         const data = JSON.parse(event.data);
         containersData = data;
         containers = data.containers || [];
+        // Используем группы из API, если они есть, иначе создаем одну группу из всех контейнеров
+        if (data.groups && data.groups.length > 0) {
+          containerGroups = data.groups;
+        } else {
+          // Fallback для обратной совместимости
+          containerGroups = [{
+            project_name: '',
+            containers: containers
+          }];
+        }
         loading = false;
       } catch (error) {
         console.error('Error parsing WebSocket message:', error);
@@ -114,6 +126,29 @@
   function getSwapPercent(swapTotal, swapFree) {
     return swapTotal > 0 ? ((swapTotal - swapFree) / swapTotal) * 100 : 0;
   }
+
+  // Фильтрация групп контейнеров по имени
+  $: filteredGroups = (() => {
+    if (!filterText.trim()) {
+      return containerGroups;
+    }
+    
+    const filterLower = filterText.toLowerCase().trim();
+    return containerGroups.map(group => {
+      const filteredContainers = group.containers.filter(container => 
+        container.Name.toLowerCase().includes(filterLower)
+      );
+      
+      if (filteredContainers.length === 0) {
+        return null;
+      }
+      
+      return {
+        ...group,
+        containers: filteredContainers
+      };
+    }).filter(group => group !== null);
+  })();
 </script>
 
 <style>
@@ -146,6 +181,12 @@
     margin: 1rem;
     padding: 1rem;
     width: 300px;
+    border: 5px solid transparent;
+  }
+
+  .card.unhealthy {
+    border-color: #f44336;
+    box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
   }
 
   .card h2 {
@@ -265,6 +306,71 @@
   .mini-progress-bar.disk {
     background-color: #9c27b0;
   }
+
+  .filter-bar {
+    background: #2c3e50;
+    padding: 0.75rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .filter-bar label {
+    color: #fff;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .filter-bar input {
+    flex: 1;
+    padding: 0.5rem 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 0.95rem;
+  }
+
+  .filter-bar input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .filter-bar input:focus {
+    outline: none;
+    border-color: #4CAF50;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .container-group {
+    border: 2px solid #4CAF50;
+    border-radius: 8px;
+    margin: 1.2rem;
+    padding: 1rem;
+    background-color: rgba(76, 175, 80, 0.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .group-header {
+    background-color: #4CAF50;
+    color: white;
+    padding: 0.75rem 1rem;
+    margin: -1rem -1rem 1rem -1rem;
+    border-radius: 6px 6px 0 0;
+    font-weight: 600;
+    font-size: 1.1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .group-containers {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .group-containers .card {
+    margin: 1rem;
+  }
 </style>
 
 <header>
@@ -347,6 +453,16 @@
   </div>
 {/if}
 
+<div class="filter-bar">
+  <label for="container-filter">Filter:</label>
+  <input
+    id="container-filter"
+    type="text"
+    placeholder="Filter containers by name..."
+    bind:value={filterText}
+  />
+</div>
+
 {#if loading}
   <div class="container">
     <div class="loader-container">
@@ -355,26 +471,37 @@
   </div>
 {:else}
   <div class="container">
-    {#each containers as container (container.ID)}
-      <div class="card">
-        <h2>{container.Name}</h2>
-        <p><strong>ID:</strong> {container.ID}</p>
-        <p><strong>Image:</strong> {container.Image}</p>
-        <p><strong>tag|commit:</strong> {container.TagCommit}</p>
-        <p><strong>create image:</strong> {container.ImageCreatedAt}</p>
-        <p><strong>create container:</strong> {container.CreatedAt}</p>
-        <p><strong>uptime container:</strong> {container.Uptime}</p>
-        <p><strong>status:</strong> {container.State}</p>
-        <p><strong>health:</strong> {container.Health}</p>
-        <p><strong>running:</strong> {container.Run}</p>
-        <p><strong>restart:</strong> {container.Restart}</p>
-        <div>
-          <strong>Labels:</strong>
-          <ul>
-            {#each Object.entries(container.Labels || {}) as [key, value]}
-              <li><strong>{key}:</strong> {value}</li>
-            {/each}
-          </ul>
+    {#each filteredGroups as group (group.project_name || 'ungrouped')}
+      <div class="container-group">
+        {#if group.project_name}
+          <div class="group-header">
+            Project: {group.project_name}
+          </div>
+        {/if}
+        <div class="group-containers">
+          {#each group.containers as container (container.ID)}
+            <div class="card" class:unhealthy={container.Health === 'unhealthy'}>
+              <h2>{container.Name}</h2>
+              <p><strong>ID:</strong> {container.ID}</p>
+              <p><strong>Image:</strong> {container.Image}</p>
+              <p><strong>tag|commit:</strong> {container.TagCommit}</p>
+              <p><strong>create image:</strong> {container.ImageCreatedAt}</p>
+              <p><strong>create container:</strong> {container.CreatedAt}</p>
+              <p><strong>uptime container:</strong> {container.Uptime}</p>
+              <p><strong>status:</strong> {container.State}</p>
+              <p><strong>health:</strong> {container.Health}</p>
+              <p><strong>running:</strong> {container.Run}</p>
+              <p><strong>restart:</strong> {container.Restart}</p>
+              <div>
+                <strong>Labels:</strong>
+                <ul>
+                  {#each Object.entries(container.Labels || {}) as [key, value]}
+                    <li><strong>{key}:</strong> {value}</li>
+                  {/each}
+                </ul>
+              </div>
+            </div>
+          {/each}
         </div>
       </div>
     {/each}

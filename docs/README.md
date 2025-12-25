@@ -20,7 +20,7 @@
   - REST API to fetch container information (`/api/containers`)
   - Interacts with Docker via go-dockerclient
   - Serves static frontend files
-- **Frontend (Vue.js):**
+- **Frontend (Svelte):**
   - SPA displaying containers and their parameters
   - Automatic polling for updates
 
