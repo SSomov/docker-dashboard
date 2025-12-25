@@ -65,17 +65,38 @@ type dockerImageInspect struct {
 	RepoTags []string `json:"RepoTags"`
 }
 
-func filterLabels(labels map[string]string, hiddenPrefix string) map[string]string {
+func filterLabels(labels map[string]string) map[string]string {
 	if labels == nil {
 		return nil
 	}
-	filtered := make(map[string]string)
-	for key, value := range labels {
-		if !strings.HasPrefix(key, hiddenPrefix) {
-			filtered[key] = value
+
+	labelPrefix := os.Getenv("LABEL_PREFIX")
+	labelPrefixExclude := os.Getenv("LABEL_PREFIX_EXCLUDE")
+
+	// Если указан LABEL_PREFIX, показываем только labels с этим префиксом
+	if labelPrefix != "" {
+		filtered := make(map[string]string)
+		for key, value := range labels {
+			if strings.HasPrefix(key, labelPrefix) {
+				filtered[key] = value
+			}
 		}
+		return filtered
 	}
-	return filtered
+
+	// Если указан LABEL_PREFIX_EXCLUDE, показываем все кроме labels с этим префиксом
+	if labelPrefixExclude != "" {
+		filtered := make(map[string]string)
+		for key, value := range labels {
+			if !strings.HasPrefix(key, labelPrefixExclude) {
+				filtered[key] = value
+			}
+		}
+		return filtered
+	}
+
+	// Если ничего не указано, возвращаем все labels
+	return labels
 }
 
 func GetContainers() ([]Container, error) {
@@ -214,7 +235,7 @@ func GetContainers() ([]Container, error) {
 			if len(shortID) > 12 {
 				shortID = shortID[:12]
 			}
-			filteredLabels := filterLabels(container.Labels, "com.docker")
+			filteredLabels := filterLabels(container.Labels)
 
 			resultChan <- containerResult{
 				container: Container{

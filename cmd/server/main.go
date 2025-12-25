@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -20,7 +21,11 @@ func main() {
 		staticDir := filepath.Join("web", "public")
 		r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(staticDir))))
 
-		addr := ":8081"
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080"
+		}
+		addr := ":" + port
 		log.Printf("Server started at http://localhost%s", addr)
 		err := http.ListenAndServe(addr, r)
 		if err != nil {
