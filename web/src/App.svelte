@@ -9,6 +9,16 @@
   let wsHostInfo = null;
   let containerGroups = [];
   let filterText = '';
+  let logsShow = false;
+  
+  // Модальное окно для логов
+  let logsModalOpen = false;
+  let logsContainerId = '';
+  let logsContainerName = '';
+  let logs = [];
+  let wsLogs = null;
+  let logsContainerRef = null;
+  let autoScrollEnabled = true;
 
   $: totalDisk = (() => {
     if (!hostinfo || !hostinfo.disk_usage) return { used: 0, total: 0 };
@@ -52,6 +62,10 @@
             project_name: '',
             containers: containers
           }];
+        }
+        // Обновляем значение logs_show из API
+        if (typeof data.logs_show !== 'undefined') {
+          logsShow = data.logs_show;
         }
         loading = false;
       } catch (error) {
@@ -101,9 +115,112 @@
     };
   }
 
+  function openLogsModal(containerId, containerName) {
+    logsContainerId = containerId;
+    logsContainerName = containerName;
+    logs = [];
+    autoScrollEnabled = true; // Сбрасываем в true при открытии
+    logsModalOpen = true;
+    connectLogsWebSocket();
+  }
+
+  function isScrolledToBottom(element) {
+    if (!element) return true;
+    const threshold = 10; // Небольшой порог для учета погрешности
+    return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
+  }
+
+  function scrollToBottom() {
+    if (logsContainerRef) {
+      logsContainerRef.scrollTop = logsContainerRef.scrollHeight;
+    }
+  }
+
+  function toggleAutoScroll() {
+    autoScrollEnabled = !autoScrollEnabled;
+    if (autoScrollEnabled) {
+      scrollToBottom();
+    }
+  }
+
+  function handleLogsScroll() {
+    // Просто отслеживаем прокрутку, логика автоскролла в onmessage
+  }
+
+  function handleEscapeKey(event) {
+    if (event.key === 'Escape' && logsModalOpen) {
+      closeLogsModal();
+    }
+  }
+
+  function handleModalContentClick(event) {
+    event.stopPropagation();
+  }
+
+  function closeLogsModal() {
+    logsModalOpen = false;
+    if (wsLogs) {
+      wsLogs.close();
+      wsLogs = null;
+    }
+    logs = [];
+    logsContainerId = '';
+    logsContainerName = '';
+  }
+
+  function connectLogsWebSocket() {
+    if (!logsContainerId) return;
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/containers/${logsContainerId}/logs`;
+    
+    wsLogs = new WebSocket(wsUrl);
+
+    wsLogs.onopen = () => {
+      console.log('Logs WebSocket connected');
+    };
+
+    wsLogs.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.log) {
+          const wasAtBottom = isScrolledToBottom(logsContainerRef);
+          logs = [...logs, data.log];
+          // Автоскролл только если включен и пользователь был внизу
+          if (autoScrollEnabled && wasAtBottom) {
+            setTimeout(() => {
+              scrollToBottom();
+            }, 10);
+          }
+        } else if (data.error) {
+          const wasAtBottom = isScrolledToBottom(logsContainerRef);
+          logs = [...logs, `ERROR: ${data.error}`];
+          if (autoScrollEnabled && wasAtBottom) {
+            setTimeout(() => {
+              scrollToBottom();
+            }, 10);
+          }
+        }
+      } catch (error) {
+        console.error('Error parsing logs WebSocket message:', error);
+      }
+    };
+
+    wsLogs.onerror = (error) => {
+      console.error('Logs WebSocket error:', error);
+      logs = [...logs, 'ERROR: Failed to connect to logs stream'];
+    };
+
+    wsLogs.onclose = () => {
+      console.log('Logs WebSocket disconnected');
+    };
+  }
+
+
   onMount(() => {
     connectWebSocket();
     connectHostInfoWebSocket();
+    window.addEventListener('keydown', handleEscapeKey);
   });
 
   onDestroy(() => {
@@ -113,6 +230,10 @@
     if (wsHostInfo) {
       wsHostInfo.close();
     }
+    if (wsLogs) {
+      wsLogs.close();
+    }
+    window.removeEventListener('keydown', handleEscapeKey);
   });
 
   function getCpuPercent(cpu) {
@@ -182,11 +303,151 @@
     padding: 1rem;
     width: 300px;
     border: 5px solid transparent;
+    position: relative;
   }
 
   .card.unhealthy {
     border-color: #f44336;
     box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .card-header h2 {
+    margin: 0;
+    flex: 1;
+  }
+
+  .logs-button {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: background-color 0.2s;
+  }
+
+  .logs-button:hover {
+    background-color: #45a049;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    pointer-events: auto;
+  }
+
+  .modal-content {
+    background-color: white;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 900px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 2px solid #e0e0e0;
+    background-color: #f5f5f5;
+    border-radius: 8px 8px 0 0;
+  }
+
+  .modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #333;
+    flex: 1;
+  }
+
+  .modal-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .auto-scroll-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.9rem;
+    color: #333;
+  }
+
+  .auto-scroll-toggle input[type="checkbox"] {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+  }
+
+  .auto-scroll-toggle span {
+    white-space: nowrap;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 2rem;
+    cursor: pointer;
+    color: #666;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+  }
+
+  .modal-close:hover {
+    background-color: #e0e0e0;
+  }
+
+  .modal-body {
+    padding: 1rem;
+    overflow-y: auto;
+    flex: 1;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .log-line {
+    margin: 0;
+    padding: 0.2rem 0;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+
+  .log-empty {
+    color: #888;
+    font-style: italic;
   }
 
   .card h2 {
@@ -481,7 +742,14 @@
         <div class="group-containers">
           {#each group.containers as container (container.ID)}
             <div class="card" class:unhealthy={container.Health === 'unhealthy'}>
-              <h2>{container.Name}</h2>
+              <div class="card-header">
+                <h2>{container.Name}</h2>
+                {#if logsShow}
+                  <button class="logs-button" on:click={() => openLogsModal(container.ID, container.Name)}>
+                    logs
+                  </button>
+                {/if}
+              </div>
               <p><strong>ID:</strong> {container.ID}</p>
               <p><strong>Image:</strong> {container.Image}</p>
               <p><strong>tag|commit:</strong> {container.TagCommit}</p>
@@ -505,6 +773,34 @@
         </div>
       </div>
     {/each}
+  </div>
+{/if}
+
+<!-- Модальное окно для логов -->
+{#if logsModalOpen}
+  <div class="modal-overlay" role="button" tabindex="0" on:click={closeLogsModal} on:keydown={(e) => e.key === 'Enter' && closeLogsModal()}>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <div class="modal-content" role="dialog" aria-labelledby="modal-title" on:click={handleModalContentClick}>
+      <div class="modal-header">
+        <h2 id="modal-title">Logs: {logsContainerName}</h2>
+        <div class="modal-header-controls">
+          <label class="auto-scroll-toggle">
+            <input type="checkbox" bind:checked={autoScrollEnabled} on:change={toggleAutoScroll} />
+            <span>Auto-scroll</span>
+          </label>
+          <button class="modal-close" on:click={closeLogsModal} aria-label="Close logs modal">×</button>
+        </div>
+      </div>
+      <div class="modal-body" bind:this={logsContainerRef} on:scroll={handleLogsScroll}>
+        {#each logs as log, index (index)}
+          <div class="log-line">{log}</div>
+        {/each}
+        {#if logs.length === 0}
+          <div class="log-line log-empty">Waiting for logs...</div>
+        {/if}
+      </div>
+    </div>
   </div>
 {/if}
 

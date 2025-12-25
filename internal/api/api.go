@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"docker-dashboard/internal/containers"
@@ -28,18 +33,21 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/api/hostinfo", getHostInfoHandler).Methods("GET")
 	// WebSocket эндпоинт для hostinfo
 	r.HandleFunc("/ws/hostinfo", hostinfoWebSocketHandler)
+	// WebSocket эндпоинт для логов контейнера
+	r.HandleFunc("/ws/containers/{id}/logs", containerLogsWebSocketHandler)
 }
 
 type containerGroup struct {
-	ProjectName string                `json:"project_name,omitempty"`
+	ProjectName string                 `json:"project_name,omitempty"`
 	Containers  []containers.Container `json:"containers"`
 }
 
 type containersResponse struct {
-	SnapshotTime time.Time         `json:"snapshot_time"`
-	Total        int               `json:"total"`
+	SnapshotTime time.Time              `json:"snapshot_time"`
+	Total        int                    `json:"total"`
 	Containers   []containers.Container `json:"containers"` // Для обратной совместимости
-	Groups       []containerGroup  `json:"groups"`
+	Groups       []containerGroup       `json:"groups"`
+	LogsShow     bool                   `json:"logs_show"`
 }
 
 func groupContainers(containerList []containers.Container) []containerGroup {
@@ -99,6 +107,18 @@ func groupContainers(containerList []containers.Container) []containerGroup {
 	return groups
 }
 
+func getLogsShow() bool {
+	logsShow := os.Getenv("LOGS_SHOW")
+	if logsShow == "" {
+		return false
+	}
+	value, err := strconv.ParseBool(logsShow)
+	if err != nil {
+		return false
+	}
+	return value
+}
+
 func getContainersHandler(w http.ResponseWriter, r *http.Request) {
 	containerList, err := containers.GetContainers()
 	if err != nil {
@@ -111,6 +131,7 @@ func getContainersHandler(w http.ResponseWriter, r *http.Request) {
 		Total:        len(containerList),
 		Containers:   containerList,
 		Groups:       groupContainers(containerList),
+		LogsShow:     getLogsShow(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -154,6 +175,7 @@ func sendContainersData(conn *websocket.Conn) error {
 		Total:        len(containerList),
 		Containers:   containerList,
 		Groups:       groupContainers(containerList),
+		LogsShow:     getLogsShow(),
 	}
 
 	return conn.WriteJSON(response)
@@ -202,4 +224,106 @@ func sendHostInfoData(conn *websocket.Conn) error {
 	}
 
 	return conn.WriteJSON(metrics)
+}
+
+func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	containerID := vars["id"]
+	if containerID == "" {
+		http.Error(w, "Container ID is required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Создаем HTTP клиент для Docker API
+	tr := &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", "/var/run/docker.sock")
+		},
+	}
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   0, // Без таймаута для streaming
+	}
+
+	// Запрашиваем логи с follow=true для получения потока
+	// Используем timestamps=false для упрощения, но все равно нужно обработать заголовки
+	logsURL := "http://unix/containers/" + containerID + "/logs?follow=true&stdout=true&stderr=true&tail=100&timestamps=false"
+	log.Printf("[docker-dashboard] GET %s", logsURL)
+
+	req, err := http.NewRequest("GET", logsURL, nil)
+	if err != nil {
+		log.Printf("Failed to create request: %v", err)
+		conn.WriteJSON(map[string]string{"error": "Failed to create request"})
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to get logs: %v", err)
+		conn.WriteJSON(map[string]string{"error": "Failed to get logs: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Docker API returned status %d", resp.StatusCode)
+		conn.WriteJSON(map[string]string{"error": "Docker API returned status " + string(rune(resp.StatusCode))})
+		return
+	}
+
+	// Docker API возвращает логи в формате: [8 байт заголовка][данные]
+	// Заголовок: [stream type (1 байт)][padding (3 байта)][размер данных (4 байта, big-endian)]
+	// Stream type: 1 = stdout, 2 = stderr
+	buffer := make([]byte, 8192)
+	for {
+		// Читаем заголовок (8 байт)
+		header := make([]byte, 8)
+		n, err := resp.Body.Read(header)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("Error reading header: %v", err)
+			break
+		}
+		if n < 8 {
+			break
+		}
+
+		// Извлекаем размер данных из заголовка (байты 4-7, big-endian)
+		size := int(header[4])<<24 | int(header[5])<<16 | int(header[6])<<8 | int(header[7])
+		if size <= 0 || size > len(buffer) {
+			// Пропускаем некорректные данные
+			continue
+		}
+
+		// Читаем данные
+		data := make([]byte, size)
+		read := 0
+		for read < size {
+			n, err := resp.Body.Read(data[read:])
+			if err != nil && err != io.EOF {
+				log.Printf("Error reading log data: %v", err)
+				return
+			}
+			if n == 0 {
+				break
+			}
+			read += n
+		}
+
+		// Отправляем через WebSocket
+		logLine := string(data[:read])
+		if err := conn.WriteJSON(map[string]string{"log": logLine}); err != nil {
+			log.Printf("WebSocket write error: %v", err)
+			return
+		}
+	}
 }
