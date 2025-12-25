@@ -1,11 +1,12 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import axios from 'axios';
 
   let containers = [];
   let containersData = null;
   let loading = true;
   let hostinfo = null;
+  let ws = null;
 
   $: totalDisk = (() => {
     if (!hostinfo || !hostinfo.disk_usage) return { used: 0, total: 0 };
@@ -22,32 +23,52 @@
     return `${window.location.origin}${window.location.pathname}`;
   }
 
-  function fetchContainers() {
-    axios.get(`${getBaseUrl()}/api/containers`)
-      .then(response => {
-        containersData = response.data;
-        containers = response.data.containers || [];
-        loading = false;
-        setTimeout(fetchContainers, 5000);
-      })
-      .catch(error => {
-        console.error('Error fetching containers:', error);
-        loading = false;
-        setTimeout(fetchContainers, 5000);
-      });
-  }
-
   function formatTime(dateString) {
     if (!dateString) return '';
     const date = new Date(dateString);
     return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
+  function connectWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/containers`;
+    
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      loading = false;
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        containersData = data;
+        containers = data.containers || [];
+        loading = false;
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      loading = false;
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected, reconnecting...');
+      loading = true;
+      // Переподключение через 2 секунды
+      setTimeout(connectWebSocket, 2000);
+    };
+  }
+
   function fetchHostInfo() {
     axios.get(`${getBaseUrl()}/api/hostinfo`)
       .then(response => {
         hostinfo = response.data;
-        setTimeout(fetchHostInfo, 5000);
+        setTimeout(fetchHostInfo, 2000);
       })
       .catch(error => {
         console.error('Error fetching hostinfo:', error);
@@ -56,8 +77,14 @@
   }
 
   onMount(() => {
-    fetchContainers();
+    connectWebSocket();
     fetchHostInfo();
+  });
+
+  onDestroy(() => {
+    if (ws) {
+      ws.close();
+    }
   });
 
   function getCpuPercent(cpu) {

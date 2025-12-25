@@ -6,6 +6,7 @@ toolchain go1.24.4
 
 require (
 	github.com/gorilla/mux v1.8.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/shirou/gopsutil/v4 v4.25.6
 )
 
