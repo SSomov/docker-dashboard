@@ -146,6 +146,18 @@ func containersWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Канал для обработки закрытия соединения клиентом
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -154,6 +166,8 @@ func containersWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		select {
+		case <-done:
+			return
 		case <-ticker.C:
 			if err := sendContainersData(conn); err != nil {
 				log.Printf("WebSocket write error: %v", err)
@@ -199,6 +213,18 @@ func hostinfoWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Канал для обработки закрытия соединения клиентом
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -207,6 +233,8 @@ func hostinfoWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		select {
+		case <-done:
+			return
 		case <-ticker.C:
 			if err := sendHostInfoData(conn); err != nil {
 				log.Printf("WebSocket write error: %v", err)
@@ -241,16 +269,33 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Создаем HTTP клиент для Docker API
+	// Создаем HTTP клиент для Docker API с закрытием соединений
 	tr := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial("unix", "/var/run/docker.sock")
 		},
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     30 * time.Second,
 	}
+	defer tr.CloseIdleConnections()
+
 	client := &http.Client{
 		Transport: tr,
 		Timeout:   0, // Без таймаута для streaming
 	}
+
+	// Канал для обработки закрытия соединения клиентом
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+		}
+	}()
 
 	// Запрашиваем логи с follow=true для получения потока
 	// Используем timestamps=false для упрощения, но все равно нужно обработать заголовки
@@ -281,8 +326,14 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	// Docker API возвращает логи в формате: [8 байт заголовка][данные]
 	// Заголовок: [stream type (1 байт)][padding (3 байта)][размер данных (4 байта, big-endian)]
 	// Stream type: 1 = stdout, 2 = stderr
-	buffer := make([]byte, 8192)
+	const maxLogSize = 64 * 1024 // Максимальный размер одной строки лога (64KB)
 	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+
 		// Читаем заголовок (8 байт)
 		header := make([]byte, 8)
 		n, err := resp.Body.Read(header)
@@ -299,9 +350,13 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Извлекаем размер данных из заголовка (байты 4-7, big-endian)
 		size := int(header[4])<<24 | int(header[5])<<16 | int(header[6])<<8 | int(header[7])
-		if size <= 0 || size > len(buffer) {
-			// Пропускаем некорректные данные
+		if size <= 0 {
 			continue
+		}
+		// Ограничиваем размер для предотвращения утечек памяти
+		if size > maxLogSize {
+			log.Printf("Log line too large (%d bytes), truncating to %d", size, maxLogSize)
+			size = maxLogSize
 		}
 
 		// Читаем данные

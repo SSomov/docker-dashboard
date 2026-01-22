@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -14,6 +13,30 @@ import (
 	"sync"
 	"time"
 )
+
+// Глобальный HTTP клиент для Docker API для переиспользования соединений
+var (
+	dockerClient     *http.Client
+	dockerClientOnce sync.Once
+)
+
+func getDockerClient() *http.Client {
+	dockerClientOnce.Do(func() {
+		tr := &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", "/var/run/docker.sock")
+			},
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		}
+		dockerClient = &http.Client{
+			Transport: tr,
+			Timeout:   5 * time.Second,
+		}
+	})
+	return dockerClient
+}
 
 type Container struct {
 	ID             string            `json:"ID"`
@@ -106,15 +129,7 @@ func GetContainers() ([]Container, error) {
 		debug = true
 	}
 	log.Println("[docker-dashboard] GetContainers: start (net/http raw)")
-	tr := &http.Transport{
-		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial("unix", "/var/run/docker.sock")
-		},
-	}
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   5 * time.Second,
-	}
+	client := getDockerClient()
 	url := "http://unix/containers/json?all=1"
 	log.Printf("[docker-dashboard] GET %s", url)
 	resp, err := client.Get(url)
@@ -169,7 +184,7 @@ func GetContainers() ([]Container, error) {
 				resultChan <- containerResult{err: err, index: idx}
 				return
 			}
-			inspectBody, err := ioutil.ReadAll(inspectResp.Body)
+			inspectBody, err := io.ReadAll(inspectResp.Body)
 			inspectResp.Body.Close()
 			if err != nil {
 				log.Printf("[docker-dashboard] inspect read error: %v", err)
@@ -194,7 +209,7 @@ func GetContainers() ([]Container, error) {
 				imageURL := fmt.Sprintf("http://unix/images/%s/json", container.ImageID)
 				imageResp, err := client.Get(imageURL)
 				if err == nil {
-					imageBody, err := ioutil.ReadAll(imageResp.Body)
+					imageBody, err := io.ReadAll(imageResp.Body)
 					imageResp.Body.Close()
 					if err == nil {
 						var imageInfo dockerImageInspect
