@@ -9,6 +9,7 @@
   let wsHostInfo = null;
   let containerGroups = [];
   let filterText = '';
+  let selectedGroup = null; // null означает "все группы"
   let logsShow = false;
   
   // Модальное окно для логов
@@ -24,6 +25,7 @@
   let headerHeight = 0;
   let metricsBarHeight = 0;
   let filterBarHeight = 0;
+  let groupTagsBarHeight = 0;
   let totalFixedHeight = 0;
 
   $: totalDisk = (() => {
@@ -242,11 +244,13 @@
       const headerEl = document.querySelector('header');
       const metricsBarEl = document.querySelector('.metrics-bar');
       const filterBarEl = document.querySelector('.filter-bar');
+      const groupTagsBarEl = document.querySelector('.group-tags-bar');
       
       headerHeight = headerEl ? headerEl.offsetHeight : 0;
       metricsBarHeight = metricsBarEl ? metricsBarEl.offsetHeight : 0;
       filterBarHeight = filterBarEl ? filterBarEl.offsetHeight : 0;
-      totalFixedHeight = headerHeight + metricsBarHeight + filterBarHeight;
+      groupTagsBarHeight = groupTagsBarEl ? groupTagsBarEl.offsetHeight : 0;
+      totalFixedHeight = headerHeight + metricsBarHeight + filterBarHeight + groupTagsBarHeight;
     };
     
     updateFixedHeights();
@@ -254,17 +258,19 @@
     window.addEventListener('resize', updateFixedHeights);
   });
   
-  // Обновляем высоту при изменении hostinfo (может измениться высота metrics-bar)
-  $: if (hostinfo) {
+  // Обновляем высоту при изменении hostinfo или групп (может измениться высота элементов)
+  $: if (hostinfo || allGroups.length > 0) {
     setTimeout(() => {
       const headerEl = document.querySelector('header');
       const metricsBarEl = document.querySelector('.metrics-bar');
       const filterBarEl = document.querySelector('.filter-bar');
+      const groupTagsBarEl = document.querySelector('.group-tags-bar');
       
       if (headerEl) headerHeight = headerEl.offsetHeight;
       if (metricsBarEl) metricsBarHeight = metricsBarEl.offsetHeight;
       if (filterBarEl) filterBarHeight = filterBarEl.offsetHeight;
-      totalFixedHeight = headerHeight + metricsBarHeight + filterBarHeight;
+      if (groupTagsBarEl) groupTagsBarHeight = groupTagsBarEl.offsetHeight;
+      totalFixedHeight = headerHeight + metricsBarHeight + filterBarHeight + groupTagsBarHeight;
     }, 100);
   }
 
@@ -293,14 +299,39 @@
     return swapTotal > 0 ? ((swapTotal - swapFree) / swapTotal) * 100 : 0;
   }
 
-  // Фильтрация групп контейнеров по имени
+  // Получение списка всех уникальных групп
+  $: allGroups = (() => {
+    const groups = new Set();
+    containerGroups.forEach(group => {
+      if (group.project_name !== undefined) {
+        groups.add(group.project_name || ''); // Пустая строка для группы без проекта
+      }
+    });
+    return Array.from(groups).sort((a, b) => {
+      if (a === '') return 1; // Группа без проекта в конец
+      if (b === '') return -1;
+      return a.localeCompare(b);
+    });
+  })();
+
+  // Фильтрация групп контейнеров по имени и выбранной группе
   $: filteredGroups = (() => {
+    // Сначала фильтруем по выбранной группе
+    let groupsToFilter = containerGroups;
+    if (selectedGroup !== null) {
+      groupsToFilter = containerGroups.filter(group => {
+        const groupName = group.project_name || '';
+        return groupName === selectedGroup;
+      });
+    }
+    
+    // Затем применяем фильтр по имени контейнера
     if (!filterText.trim()) {
-      return containerGroups;
+      return groupsToFilter;
     }
     
     const filterLower = filterText.toLowerCase().trim();
-    return containerGroups.map(group => {
+    return groupsToFilter.map(group => {
       const filteredContainers = group.containers.filter(container => 
         container.Name.toLowerCase().includes(filterLower)
       );
@@ -315,6 +346,15 @@
       };
     }).filter(group => group !== null);
   })();
+
+  // Обработчик клика по тегу группы
+  const handleGroupClick = (groupName) => {
+    if (selectedGroup === groupName) {
+      selectedGroup = null; // Снимаем фильтр при повторном клике
+    } else {
+      selectedGroup = groupName;
+    }
+  };
 </script>
 
 <style>
@@ -431,6 +471,21 @@
   .card.unhealthy {
     border-color: #f44336;
     box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
+  }
+
+  .card.stopped {
+    background-color: #f5f5f5;
+    opacity: 0.7;
+    border-color: #9e9e9e;
+    box-shadow: 0 2px 5px rgba(158, 158, 158, 0.2);
+  }
+
+  .card.stopped .card-header h2 {
+    color: #757575;
+  }
+
+  .card.stopped p {
+    color: #9e9e9e;
   }
 
   .card-header {
@@ -733,6 +788,54 @@
     background: rgba(255, 255, 255, 0.15);
   }
 
+  .group-tags-bar {
+    background: #34495e;
+    padding: 0.75rem 1.5rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 99;
+  }
+
+  .group-tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .group-tag {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .group-tag:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  .group-tag.active {
+    background: #4CAF50;
+    border-color: #4CAF50;
+    color: white;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+  }
+
+  .group-tag.active:hover {
+    background: #45a049;
+    border-color: #45a049;
+  }
+
   .container-group {
     border: 2px solid #4CAF50;
     border-radius: 8px;
@@ -874,6 +977,29 @@
     />
   </div>
 
+  {#if allGroups.length > 0}
+    <div class="group-tags-bar" style="top: {headerHeight + metricsBarHeight + filterBarHeight}px">
+      <div class="group-tags-container">
+        <button
+          class="group-tag"
+          class:active={selectedGroup === null}
+          on:click={() => handleGroupClick(null)}
+        >
+          All
+        </button>
+        {#each allGroups as groupName (groupName)}
+          <button
+            class="group-tag"
+            class:active={selectedGroup === groupName}
+            on:click={() => handleGroupClick(groupName)}
+          >
+            {groupName || 'No Project'}
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   <div class="content-wrapper" style="padding-top: {totalFixedHeight}px">
     {#if loading}
       <div class="container">
@@ -892,7 +1018,7 @@
         {/if}
         <div class="group-containers">
           {#each group.containers as container (container.ID)}
-            <div class="card" class:unhealthy={container.Health === 'unhealthy'}>
+            <div class="card" class:unhealthy={container.Health === 'unhealthy'} class:stopped={!container.Run || container.State !== 'running'}>
               <div class="card-header">
                 <h2>{container.Name}</h2>
                 {#if logsShow}
