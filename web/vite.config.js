@@ -121,6 +121,9 @@ export default defineConfig({
     outDir: resolve(__dirname, 'public'),
     emptyOutDir: true
   },
-  base: './'
+  base: './',
+  define: {
+    '__APP_VERSION__': JSON.stringify(process.env.VITE_APP_VERSION || 'dev')
+  }
 });
 
