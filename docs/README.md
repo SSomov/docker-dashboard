@@ -1,6 +1,6 @@
 # Docker Dashboard
 
-![Dashboard Screenshot](docs/images/docker-dashboard.png)
+![Dashboard Screenshot](images/docker-dashboard.png)
 
 ## Description
 
