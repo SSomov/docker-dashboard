@@ -35,6 +35,8 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/ws/hostinfo", hostinfoWebSocketHandler)
 	// WebSocket эндпоинт для логов контейнера
 	r.HandleFunc("/ws/containers/{id}/logs", containerLogsWebSocketHandler)
+	// WebSocket эндпоинт для перезагрузки контейнера
+	r.HandleFunc("/ws/containers/{id}/restart", containerRestartWebSocketHandler)
 }
 
 type containerGroup struct {
@@ -43,11 +45,12 @@ type containerGroup struct {
 }
 
 type containersResponse struct {
-	SnapshotTime time.Time              `json:"snapshot_time"`
-	Total        int                    `json:"total"`
-	Containers   []containers.Container `json:"containers"` // Для обратной совместимости
-	Groups       []containerGroup       `json:"groups"`
-	LogsShow     bool                   `json:"logs_show"`
+	SnapshotTime    time.Time              `json:"snapshot_time"`
+	Total           int                    `json:"total"`
+	Containers      []containers.Container `json:"containers"` // Для обратной совместимости
+	Groups          []containerGroup       `json:"groups"`
+	LogsShow        bool                   `json:"logs_show"`
+	ContainerRestart bool                  `json:"container_restart"`
 }
 
 func groupContainers(containerList []containers.Container) []containerGroup {
@@ -119,6 +122,18 @@ func getLogsShow() bool {
 	return value
 }
 
+func getContainerRestart() bool {
+	containerRestart := os.Getenv("CONTAINER_RESTART")
+	if containerRestart == "" {
+		return false
+	}
+	value, err := strconv.ParseBool(containerRestart)
+	if err != nil {
+		return false
+	}
+	return value
+}
+
 func getContainersHandler(w http.ResponseWriter, r *http.Request) {
 	containerList, err := containers.GetContainers()
 	if err != nil {
@@ -127,11 +142,12 @@ func getContainersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := containersResponse{
-		SnapshotTime: time.Now(),
-		Total:        len(containerList),
-		Containers:   containerList,
-		Groups:       groupContainers(containerList),
-		LogsShow:     getLogsShow(),
+		SnapshotTime:    time.Now(),
+		Total:           len(containerList),
+		Containers:      containerList,
+		Groups:          groupContainers(containerList),
+		LogsShow:        getLogsShow(),
+		ContainerRestart: getContainerRestart(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -185,11 +201,12 @@ func sendContainersData(conn *websocket.Conn) error {
 	}
 
 	response := containersResponse{
-		SnapshotTime: time.Now(),
-		Total:        len(containerList),
-		Containers:   containerList,
-		Groups:       groupContainers(containerList),
-		LogsShow:     getLogsShow(),
+		SnapshotTime:    time.Now(),
+		Total:           len(containerList),
+		Containers:      containerList,
+		Groups:          groupContainers(containerList),
+		LogsShow:        getLogsShow(),
+		ContainerRestart: getContainerRestart(),
 	}
 
 	return conn.WriteJSON(response)
@@ -381,4 +398,78 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func containerRestartWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+	// Проверяем что функция включена
+	if !getContainerRestart() {
+		http.Error(w, "Container restart is disabled", http.StatusForbidden)
+		return
+	}
+
+	vars := mux.Vars(r)
+	containerID := vars["id"]
+	if containerID == "" {
+		http.Error(w, "Container ID is required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Создаем HTTP клиент для Docker API
+	tr := &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", "/var/run/docker.sock")
+		},
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     30 * time.Second,
+	}
+	defer tr.CloseIdleConnections()
+
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   10 * time.Second,
+	}
+
+	// Выполняем POST запрос к Docker API для перезагрузки контейнера
+	restartURL := "http://unix/containers/" + containerID + "/restart"
+	log.Printf("[docker-dashboard] POST %s", restartURL)
+
+	req, err := http.NewRequest("POST", restartURL, nil)
+	if err != nil {
+		log.Printf("Failed to create request: %v", err)
+		conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to create request: " + err.Error()})
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to restart container: %v", err)
+		conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to restart container: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Docker API возвращает 204 No Content при успешном перезапуске
+	if resp.StatusCode == http.StatusNoContent {
+		conn.WriteJSON(map[string]string{"status": "success", "message": "Container restarted successfully"})
+		return
+	}
+
+	// Читаем тело ответа для получения деталей ошибки
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Failed to read error response: %v", err)
+		conn.WriteJSON(map[string]string{"status": "error", "message": "Docker API returned status " + strconv.Itoa(resp.StatusCode)})
+		return
+	}
+
+	log.Printf("Docker API returned status %d: %s", resp.StatusCode, string(body))
+	conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to restart container: " + string(body)})
 }

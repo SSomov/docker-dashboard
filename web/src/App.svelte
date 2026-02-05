@@ -11,6 +11,7 @@
   let filterText = "";
   let selectedGroup = null; // null означает "все группы"
   let logsShow = false;
+  let containerRestart = false;
 
   // Модальное окно для логов
   let logsModalOpen = false;
@@ -93,6 +94,10 @@
         // Обновляем значение logs_show из API
         if (typeof data.logs_show !== "undefined") {
           logsShow = data.logs_show;
+        }
+        // Обновляем значение container_restart из API
+        if (typeof data.container_restart !== "undefined") {
+          containerRestart = data.container_restart;
         }
         loading = false;
       } catch (error) {
@@ -371,6 +376,57 @@
       selectedGroup = groupName;
     }
   };
+
+  // Обработчик перезагрузки контейнера через WebSocket
+  const handleRestartContainer = (containerId, containerName) => {
+    if (!containerRestart) {
+      console.warn("Container restart is disabled");
+      return;
+    }
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/containers/${containerId}/restart`;
+
+    const wsRestart = new WebSocket(wsUrl);
+
+    wsRestart.onopen = () => {
+      console.log("Restart WebSocket connected");
+    };
+
+    wsRestart.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.status === "success") {
+          console.log(
+            `Container ${containerName} restarted successfully:`,
+            data.message,
+          );
+        } else {
+          console.error(
+            `Failed to restart container ${containerName}:`,
+            data.message,
+          );
+          alert(
+            `Failed to restart container ${containerName}: ${data.message}`,
+          );
+        }
+      } catch (error) {
+        console.error("Error parsing restart response:", error);
+        alert(`Failed to restart container ${containerName}: Invalid response`);
+      }
+      wsRestart.close();
+    };
+
+    wsRestart.onerror = (error) => {
+      console.error(`WebSocket error for restart ${containerName}:`, error);
+      alert(`Failed to restart container ${containerName}: Connection error`);
+      wsRestart.close();
+    };
+
+    wsRestart.onclose = () => {
+      console.log("Restart WebSocket disconnected");
+    };
+  };
 </script>
 
 <div class="scrollable-content">
@@ -626,15 +682,29 @@
                 >
                   <div class="card-header">
                     <h2>{container.Name}</h2>
-                    {#if logsShow}
-                      <button
-                        class="logs-button"
-                        on:click={() =>
-                          openLogsModal(container.ID, container.Name)}
-                      >
-                        logs
-                      </button>
-                    {/if}
+                    <div class="card-header-buttons">
+                      {#if logsShow}
+                        <button
+                          class="logs-button"
+                          on:click={() =>
+                            openLogsModal(container.ID, container.Name)}
+                        >
+                          logs
+                        </button>
+                      {/if}
+                      {#if containerRestart}
+                        <button
+                          class="restart-button"
+                          on:click={() =>
+                            handleRestartContainer(
+                              container.ID,
+                              container.Name,
+                            )}
+                        >
+                          restart
+                        </button>
+                      {/if}
+                    </div>
                   </div>
                   <p><strong>ID:</strong> {container.ID}</p>
                   <p><strong>Image:</strong> {container.Image}</p>
@@ -871,6 +941,12 @@
     flex: 1;
   }
 
+  .card-header-buttons {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
   .logs-button {
     background-color: #4caf50;
     color: white;
@@ -885,6 +961,22 @@
 
   .logs-button:hover {
     background-color: #45a049;
+  }
+
+  .restart-button {
+    background-color: #2196f3;
+    color: white;
+    border: none;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: background-color 0.2s;
+  }
+
+  .restart-button:hover {
+    background-color: #1976d2;
   }
 
   .modal-overlay {

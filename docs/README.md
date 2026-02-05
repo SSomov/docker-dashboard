@@ -19,6 +19,7 @@
 - **Filter containers by name** - real-time search functionality
 - **Filter by project groups** - quick access to specific compose projects
 - **Real-time container logs** - view container logs in a modal window with auto-scroll support
+- **Container restart** - restart containers directly from the UI (requires `CONTAINER_RESTART=true`)
 - Visual indicators for unhealthy and stopped containers
 
 ### System Metrics
@@ -98,6 +99,7 @@ services:
     environment:
       - PORT=8080
       - LOGS_SHOW=true
+      - CONTAINER_RESTART=true
       - LABEL_PREFIX=org.example
     restart: always
 ```
@@ -155,6 +157,7 @@ Open your browser: [http://localhost:8080](http://localhost:8080)
 - `LABEL_PREFIX` — show only container labels with this prefix (e.g., `org.example`)
 - `LABEL_PREFIX_EXCLUDE` — show all labels except those with this prefix
 - `LOGS_SHOW` — enable/disable logs button in UI (`true`/`false`, default: `false`)
+- `CONTAINER_RESTART` — enable/disable container restart button in UI (`true`/`false`, default: `false`)
 - `DEBUG` — enable debug logging (`true`/`false`, default: `false`)
 
 ## API Endpoints
@@ -167,6 +170,7 @@ Open your browser: [http://localhost:8080](http://localhost:8080)
 - `WS /ws/containers` — real-time container list updates (updates every 1 second)
 - `WS /ws/hostinfo` — real-time system metrics updates (updates every 1 second)
 - `WS /ws/containers/{id}/logs` — stream container logs in real-time
+- `WS /ws/containers/{id}/restart` — restart a container (requires `CONTAINER_RESTART=true`)
 
 ## Dependencies
 
