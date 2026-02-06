@@ -2,6 +2,8 @@
 
 ![Dashboard Screenshot](images/docker-dashboard.png)
 
+![Dashboard Mobile Screenshot](images/docker-dashboard-mobile.png)
+
 ## Description
 
 **Docker Dashboard** (CoreOps Dashboard) is a modern web interface for real-time monitoring of Docker containers and system metrics. The project provides a comprehensive view of running containers, their status, system resources, and allows viewing container logs in real-time.

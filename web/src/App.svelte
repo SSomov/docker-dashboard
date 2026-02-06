@@ -1256,6 +1256,21 @@
     color: rgba(255, 255, 255, 0.9);
   }
 
+  @media (max-width: 768px) {
+    .metrics-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .metrics-header-left,
+    .metrics-header-right {
+      width: 100%;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+  }
+
   .metrics-row {
     display: flex;
     flex-wrap: wrap;

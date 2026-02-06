@@ -1,11 +1,11 @@
-FROM golang:1.25-alpine as go-build-stage
+FROM golang:1.25-alpine AS go-build-stage
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o server cmd/server/main.go
 
-FROM oven/bun:alpine as web-build-stage
+FROM oven/bun:alpine AS web-build-stage
 ARG VITE_APP_VERSION
 ENV VITE_APP_VERSION=${VITE_APP_VERSION:-0.0.0}
 WORKDIR /app
