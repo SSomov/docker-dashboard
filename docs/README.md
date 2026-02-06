@@ -1,8 +1,9 @@
 # Docker Dashboard
 
-![Dashboard Screenshot](images/docker-dashboard.png)
-
-![Dashboard Mobile Screenshot](images/docker-dashboard-mobile.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SSomov/docker-dashboard/main/docs/images/docker-dashboard.png" width="75%">
+  <img src="https://raw.githubusercontent.com/SSomov/docker-dashboard/main/docs/images/docker-dashboard-mobile.png" width="23%">
+</p>
 
 ## Description
 
