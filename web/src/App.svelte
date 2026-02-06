@@ -68,6 +68,40 @@
     }
   }
 
+  // Парсинг CPU из строки типа "2.0"
+  function parseCPU(cpuString) {
+    if (!cpuString) return 0;
+    const match = cpuString.match(/^([\d.]+)/);
+    return match ? parseFloat(match[1]) : 0;
+  }
+
+  // Парсинг Memory из строки типа "4G", "2.0G", "512M"
+  function parseMemory(memoryString) {
+    if (!memoryString) return 0;
+    const match = memoryString.match(/^([\d.]+)([GMK]?)$/i);
+    if (!match) return 0;
+    const value = parseFloat(match[1]);
+    const unit = (match[2] || "").toUpperCase();
+    switch (unit) {
+      case "G":
+        return value * 1024; // GB to MB
+      case "M":
+        return value;
+      case "K":
+        return value / 1024; // KB to MB
+      default:
+        return value / (1024 * 1024); // bytes to MB
+    }
+  }
+
+  // Форматирование Memory обратно в строку
+  function formatMemory(mb) {
+    if (mb >= 1024) {
+      return (mb / 1024).toFixed(1) + " GB";
+    }
+    return mb.toFixed(1) + " MB";
+  }
+
   function connectWebSocket() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/containers`;
@@ -320,7 +354,7 @@
       updateFixedHeights();
     };
     window.addEventListener("resize", handleResize);
-    
+
     // Следим за изменением медиа-запроса
     const mediaQuery = window.matchMedia("(max-width: 768px)");
     const handleMediaChange = (e) => {
@@ -331,7 +365,12 @@
   });
 
   // Обновляем высоту при изменении hostinfo, групп или состояния свернутости
-  $: if (hostinfo || allGroups.length > 0 || metricsRowExpanded !== undefined || groupTagsExpanded !== undefined) {
+  $: if (
+    hostinfo ||
+    allGroups.length > 0 ||
+    metricsRowExpanded !== undefined ||
+    groupTagsExpanded !== undefined
+  ) {
     setTimeout(() => {
       const headerEl = document.querySelector("header");
       const metricsBarEl = document.querySelector(".metrics-bar");
@@ -575,7 +614,9 @@
             <button
               class="toggle-button"
               on:click={handleToggleMetricsRow}
-              aria-label={metricsRowExpanded ? "Свернуть метрики" : "Развернуть метрики"}
+              aria-label={metricsRowExpanded
+                ? "Свернуть метрики"
+                : "Развернуть метрики"}
             >
               <svg
                 viewBox="0 0 24 24"
@@ -592,7 +633,10 @@
           {/if}
         </div>
       </div>
-      <div class="metrics-row" class:hidden-mobile={isMobile && !metricsRowExpanded}>
+      <div
+        class="metrics-row"
+        class:hidden-mobile={isMobile && !metricsRowExpanded}
+      >
         <span>
           <b>CPU:</b>
           {getCpuPercent(hostinfo.cpu).toFixed(1)}%
@@ -714,7 +758,9 @@
           <button
             class="toggle-button"
             on:click={handleToggleGroupTags}
-            aria-label={groupTagsExpanded ? "Свернуть группы" : "Развернуть группы"}
+            aria-label={groupTagsExpanded
+              ? "Свернуть группы"
+              : "Развернуть группы"}
           >
             <svg
               viewBox="0 0 24 24"
@@ -730,7 +776,10 @@
           </button>
         </div>
       {/if}
-      <div class="group-tags-container" class:hidden-mobile={isMobile && !groupTagsExpanded}>
+      <div
+        class="group-tags-container"
+        class:hidden-mobile={isMobile && !groupTagsExpanded}
+      >
         <button
           class="group-tag"
           class:active={selectedGroup === null}
@@ -801,6 +850,110 @@
                       {/if}
                     </div>
                   </div>
+                  {#if container.DeployResources}
+                    <div class="resources-graphs">
+                      {#if container.DeployResources.CPULimit || container.DeployResources.CPUReservation}
+                        {@const cpuLimit = parseCPU(
+                          container.DeployResources.CPULimit || "0",
+                        )}
+                        {@const cpuReservation = parseCPU(
+                          container.DeployResources.CPUReservation || "0",
+                        )}
+                        {@const cpuMax = Math.max(
+                          cpuLimit || cpuReservation,
+                          cpuReservation || cpuLimit,
+                          1,
+                        )}
+                        {@const reservationPercent =
+                          cpuMax > 0 && cpuReservation > 0
+                            ? (cpuReservation / cpuMax) * 100
+                            : 0}
+                        {@const limitPercent =
+                          cpuMax > 0 && cpuLimit > 0
+                            ? (cpuLimit / cpuMax) * 100
+                            : 0}
+                        <div class="resource-item">
+                          <div class="resource-label">
+                            <span class="resource-title">CPU</span>
+                            <span class="resource-value">
+                              {cpuReservation > 0
+                                ? cpuReservation.toFixed(1)
+                                : cpuLimit.toFixed(1)} cores
+                              {cpuLimit > 0 ? ` (limit)` : ""}
+                            </span>
+                          </div>
+                          <div class="progress-bar-container">
+                            <div class="progress-bar">
+                              {#if cpuReservation > 0}
+                                <div
+                                  class="progress-fill reservation"
+                                  style="width: {reservationPercent}%"
+                                ></div>
+                              {/if}
+                              {#if cpuLimit > 0}
+                                <div
+                                  class="progress-fill limit"
+                                  style="width: {limitPercent}%"
+                                ></div>
+                              {/if}
+                            </div>
+                          </div>
+                        </div>
+                      {/if}
+                      {#if container.DeployResources.MemoryLimit || container.DeployResources.MemoryReservation}
+                        {@const memLimitMB = parseMemory(
+                          container.DeployResources.MemoryLimit || "0",
+                        )}
+                        {@const memReservationMB = parseMemory(
+                          container.DeployResources.MemoryReservation || "0",
+                        )}
+                        {@const memMax = Math.max(
+                          memLimitMB || memReservationMB,
+                          memReservationMB || memLimitMB,
+                          1,
+                        )}
+                        {@const reservationPercent =
+                          memMax > 0 && memReservationMB > 0
+                            ? (memReservationMB / memMax) * 100
+                            : 0}
+                        {@const limitPercent =
+                          memMax > 0 && memLimitMB > 0
+                            ? (memLimitMB / memMax) * 100
+                            : 0}
+                        <div class="resource-item">
+                          <div class="resource-label">
+                            <span class="resource-title">Memory</span>
+                            <span class="resource-value">
+                              {memReservationMB > 0
+                                ? formatMemory(memReservationMB)
+                                : formatMemory(memLimitMB)}
+                              {memLimitMB > 0 && memReservationMB > 0
+                                ? ` / ${formatMemory(memLimitMB)}`
+                                : memLimitMB > 0
+                                  ? ` (limit: ${formatMemory(memLimitMB)})`
+                                  : ""}
+                            </span>
+                          </div>
+                          <div class="progress-bar-container">
+                            <div class="progress-bar">
+                              {#if memReservationMB > 0}
+                                <div
+                                  class="progress-fill reservation"
+                                  style="width: {reservationPercent}%"
+                                ></div>
+                              {/if}
+                              {#if memLimitMB > 0}
+                                <div
+                                  class="progress-fill limit"
+                                  style="width: {limitPercent}%"
+                                ></div>
+                              {/if}
+                            </div>
+                          </div>
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
                   <p><strong>ID:</strong> {container.ID}</p>
                   <p><strong>Image:</strong> {container.Image}</p>
                   <p><strong>tag|commit:</strong> {container.TagCommit}</p>
@@ -819,44 +972,14 @@
                   {/if}
                   <p><strong>running:</strong> {container.Run}</p>
                   <p><strong>restart:</strong> {container.Restart}</p>
-                  {#if container.DeployResources}
-                    <div>
-                      <strong>deploy resources:</strong>
-                      {#if container.DeployResources.CPULimit || container.DeployResources.MemoryLimit}
-                        <div style="margin-left: 1rem; margin-top: 0.5rem">
-                          <strong>limits:</strong>
-                          <ul style="margin: 0.25rem 0 0.5rem 1rem; padding: 0">
-                            {#if container.DeployResources.CPULimit}
-                              <li>cpus: {container.DeployResources.CPULimit}</li>
-                            {/if}
-                            {#if container.DeployResources.MemoryLimit}
-                              <li>memory: {container.DeployResources.MemoryLimit}</li>
-                            {/if}
-                          </ul>
-                        </div>
-                      {/if}
-                      {#if container.DeployResources.CPUReservation || container.DeployResources.MemoryReservation}
-                        <div style="margin-left: 1rem; margin-top: 0.5rem">
-                          <strong>reservations:</strong>
-                          <ul style="margin: 0.25rem 0 0.5rem 1rem; padding: 0">
-                            {#if container.DeployResources.CPUReservation}
-                              <li>cpus: {container.DeployResources.CPUReservation}</li>
-                            {/if}
-                            {#if container.DeployResources.MemoryReservation}
-                              <li>memory: {container.DeployResources.MemoryReservation}</li>
-                            {/if}
-                          </ul>
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
                   {#if container.Labels && Object.keys(container.Labels).length > 0}
                     <div class="labels-container">
                       <strong>Labels:</strong>
                       <ul class="labels-list">
                         {#each Object.entries(container.Labels) as [key, value]}
                           <li class="label-item">
-                            <strong>{key}:</strong> <span class="label-value">{value}</span>
+                            <strong>{key}:</strong>
+                            <span class="label-value">{value}</span>
                           </li>
                         {/each}
                       </ul>
@@ -1059,6 +1182,95 @@
 
   .card.stopped p {
     color: #9e9e9e;
+  }
+
+  .card.stopped .labels-container {
+    color: #9e9e9e;
+  }
+
+  .card.stopped .labels-container strong {
+    color: #757575;
+  }
+
+  .card.stopped .label-item {
+    color: #9e9e9e;
+  }
+
+  .card.stopped .label-item strong {
+    color: #757575;
+  }
+
+  .card.stopped .label-value {
+    color: #9e9e9e;
+  }
+
+  .resources-graphs {
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid #e0e0e0;
+  }
+
+  .resource-item {
+    margin-bottom: 0.5rem;
+  }
+
+  .resource-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .resource-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+  }
+
+  .resource-title {
+    font-weight: 600;
+    color: #333;
+  }
+
+  .progress-bar-container {
+    margin-top: 0.15rem;
+  }
+
+  .progress-bar {
+    position: relative;
+    width: 100%;
+    height: 10px;
+    background-color: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+  }
+
+  .progress-fill.reservation {
+    background-color: #4caf50;
+    z-index: 1;
+  }
+
+  .progress-fill.limit {
+    background-color: #2196f3;
+    opacity: 0.5;
+    z-index: 2;
+    border-right: 2px solid #1976d2;
+  }
+
+  .resource-value {
+    font-size: 0.8rem;
+    color: #555;
+    font-weight: normal;
   }
 
   .card-header {
@@ -1315,7 +1527,9 @@
     justify-content: flex-start;
     align-items: center;
     margin-top: 0.5rem;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
+    transition:
+      max-height 0.3s ease,
+      opacity 0.3s ease;
     overflow: hidden;
   }
 
@@ -1446,7 +1660,9 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
+    transition:
+      max-height 0.3s ease,
+      opacity 0.3s ease;
     overflow: hidden;
   }
 
