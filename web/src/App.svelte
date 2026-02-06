@@ -32,6 +32,11 @@
   let groupTagsBarHeight = 0;
   let totalFixedHeight = 0;
 
+  // Состояния для сворачивания блоков на мобильных
+  let isMobile = false;
+  let metricsRowExpanded = false;
+  let groupTagsExpanded = false;
+
   $: totalDisk = (() => {
     if (!hostinfo || !hostinfo.disk_usage) return { used: 0, total: 0 };
     let used = 0,
@@ -251,10 +256,47 @@
     };
   }
 
+  // Функция для определения мобильного устройства
+  const checkMobile = () => {
+    isMobile = window.matchMedia("(max-width: 768px)").matches;
+    // На мобильных по умолчанию блоки свернуты
+    if (isMobile) {
+      metricsRowExpanded = false;
+      groupTagsExpanded = false;
+    } else {
+      metricsRowExpanded = true;
+      groupTagsExpanded = true;
+    }
+  };
+
+  // Обработчики для переключения состояния блоков
+  const handleToggleMetricsRow = () => {
+    metricsRowExpanded = !metricsRowExpanded;
+    // Обновляем высоту после изменения состояния
+    setTimeout(() => {
+      const metricsBarEl = document.querySelector(".metrics-bar");
+      if (metricsBarEl) metricsBarHeight = metricsBarEl.offsetHeight;
+      totalFixedHeight =
+        headerHeight + metricsBarHeight + filterBarHeight + groupTagsBarHeight;
+    }, 350); // Ждем завершения анимации
+  };
+
+  const handleToggleGroupTags = () => {
+    groupTagsExpanded = !groupTagsExpanded;
+    // Обновляем высоту после изменения состояния
+    setTimeout(() => {
+      const groupTagsBarEl = document.querySelector(".group-tags-bar");
+      if (groupTagsBarEl) groupTagsBarHeight = groupTagsBarEl.offsetHeight;
+      totalFixedHeight =
+        headerHeight + metricsBarHeight + filterBarHeight + groupTagsBarHeight;
+    }, 350); // Ждем завершения анимации
+  };
+
   onMount(() => {
     connectWebSocket();
     connectHostInfoWebSocket();
     window.addEventListener("keydown", handleEscapeKey);
+    checkMobile();
 
     // Вычисляем высоту статичных элементов
     const updateFixedHeights = () => {
@@ -273,11 +315,23 @@
 
     updateFixedHeights();
     // Обновляем при изменении размеров окна
-    window.addEventListener("resize", updateFixedHeights);
+    const handleResize = () => {
+      checkMobile();
+      updateFixedHeights();
+    };
+    window.addEventListener("resize", handleResize);
+    
+    // Следим за изменением медиа-запроса
+    const mediaQuery = window.matchMedia("(max-width: 768px)");
+    const handleMediaChange = (e) => {
+      checkMobile();
+      updateFixedHeights();
+    };
+    mediaQuery.addEventListener("change", handleMediaChange);
   });
 
-  // Обновляем высоту при изменении hostinfo или групп (может измениться высота элементов)
-  $: if (hostinfo || allGroups.length > 0) {
+  // Обновляем высоту при изменении hostinfo, групп или состояния свернутости
+  $: if (hostinfo || allGroups.length > 0 || metricsRowExpanded !== undefined || groupTagsExpanded !== undefined) {
     setTimeout(() => {
       const headerEl = document.querySelector("header");
       const metricsBarEl = document.querySelector(".metrics-bar");
@@ -517,9 +571,28 @@
                 : "-"}</span
             >
           {/if}
+          {#if isMobile}
+            <button
+              class="toggle-button"
+              on:click={handleToggleMetricsRow}
+              aria-label={metricsRowExpanded ? "Свернуть метрики" : "Развернуть метрики"}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class:rotated={metricsRowExpanded}
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+          {/if}
         </div>
       </div>
-      <div class="metrics-row">
+      <div class="metrics-row" class:hidden-mobile={isMobile && !metricsRowExpanded}>
         <span>
           <b>CPU:</b>
           {getCpuPercent(hostinfo.cpu).toFixed(1)}%
@@ -635,7 +708,29 @@
       class="group-tags-bar"
       style="top: {headerHeight + metricsBarHeight + filterBarHeight}px"
     >
-      <div class="group-tags-container">
+      {#if isMobile}
+        <div class="group-tags-header">
+          <span class="group-tags-title">Groups</span>
+          <button
+            class="toggle-button"
+            on:click={handleToggleGroupTags}
+            aria-label={groupTagsExpanded ? "Свернуть группы" : "Развернуть группы"}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class:rotated={groupTagsExpanded}
+            >
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+        </div>
+      {/if}
+      <div class="group-tags-container" class:hidden-mobile={isMobile && !groupTagsExpanded}>
         <button
           class="group-tag"
           class:active={selectedGroup === null}
@@ -828,8 +923,8 @@
   }
 
   .logo {
-    width: 48px;
-    height: 48px;
+    width: 24px;
+    height: 24px;
     flex-shrink: 0;
   }
 
@@ -1168,6 +1263,14 @@
     justify-content: flex-start;
     align-items: center;
     margin-top: 0.5rem;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    overflow: hidden;
+  }
+
+  .metrics-row.hidden-mobile {
+    max-height: 0;
+    margin-top: 0;
+    opacity: 0;
   }
 
   .metrics-bar span {
@@ -1265,11 +1368,39 @@
     z-index: 99;
   }
 
+  .group-tags-header {
+    display: none;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  @media (max-width: 768px) {
+    .group-tags-header {
+      display: flex;
+    }
+  }
+
+  .group-tags-title {
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
   .group-tags-container {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    overflow: hidden;
+  }
+
+  .group-tags-container.hidden-mobile {
+    max-height: 0;
+    opacity: 0;
   }
 
   .group-tag {
@@ -1331,5 +1462,45 @@
 
   .group-containers .card {
     margin: 1rem;
+  }
+
+  .toggle-button {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    padding: 0.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+  }
+
+  .toggle-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  .toggle-button svg {
+    width: 20px;
+    height: 20px;
+    transition: transform 0.3s ease;
+  }
+
+  .toggle-button svg.rotated {
+    transform: rotate(180deg);
+  }
+
+  @media (min-width: 769px) {
+    .metrics-row.hidden-mobile,
+    .group-tags-container.hidden-mobile {
+      max-height: none !important;
+      opacity: 1 !important;
+      margin-top: 0.5rem !important;
+    }
   }
 </style>

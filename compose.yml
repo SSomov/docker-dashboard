@@ -3,6 +3,7 @@ services:
   docker_status:
     image: avt0x/docker-dashboard:latest
     container_name: docker-dashboard
+    hostname: dev
     env_file:
       - .env
     volumes:
