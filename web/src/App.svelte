@@ -814,17 +814,54 @@
                   </p>
                   <p><strong>uptime container:</strong> {container.Uptime}</p>
                   <p><strong>status:</strong> {container.State}</p>
-                  <p><strong>health:</strong> {container.Health}</p>
+                  {#if container.Health}
+                    <p><strong>health:</strong> {container.Health}</p>
+                  {/if}
                   <p><strong>running:</strong> {container.Run}</p>
                   <p><strong>restart:</strong> {container.Restart}</p>
-                  <div>
-                    <strong>Labels:</strong>
-                    <ul>
-                      {#each Object.entries(container.Labels || {}) as [key, value]}
-                        <li><strong>{key}:</strong> {value}</li>
-                      {/each}
-                    </ul>
-                  </div>
+                  {#if container.DeployResources}
+                    <div>
+                      <strong>deploy resources:</strong>
+                      {#if container.DeployResources.CPULimit || container.DeployResources.MemoryLimit}
+                        <div style="margin-left: 1rem; margin-top: 0.5rem">
+                          <strong>limits:</strong>
+                          <ul style="margin: 0.25rem 0 0.5rem 1rem; padding: 0">
+                            {#if container.DeployResources.CPULimit}
+                              <li>cpus: {container.DeployResources.CPULimit}</li>
+                            {/if}
+                            {#if container.DeployResources.MemoryLimit}
+                              <li>memory: {container.DeployResources.MemoryLimit}</li>
+                            {/if}
+                          </ul>
+                        </div>
+                      {/if}
+                      {#if container.DeployResources.CPUReservation || container.DeployResources.MemoryReservation}
+                        <div style="margin-left: 1rem; margin-top: 0.5rem">
+                          <strong>reservations:</strong>
+                          <ul style="margin: 0.25rem 0 0.5rem 1rem; padding: 0">
+                            {#if container.DeployResources.CPUReservation}
+                              <li>cpus: {container.DeployResources.CPUReservation}</li>
+                            {/if}
+                            {#if container.DeployResources.MemoryReservation}
+                              <li>memory: {container.DeployResources.MemoryReservation}</li>
+                            {/if}
+                          </ul>
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+                  {#if container.Labels && Object.keys(container.Labels).length > 0}
+                    <div class="labels-container">
+                      <strong>Labels:</strong>
+                      <ul class="labels-list">
+                        {#each Object.entries(container.Labels) as [key, value]}
+                          <li class="label-item">
+                            <strong>{key}:</strong> <span class="label-value">{value}</span>
+                          </li>
+                        {/each}
+                      </ul>
+                    </div>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -1517,5 +1554,32 @@
       opacity: 1 !important;
       margin-top: 0.5rem !important;
     }
+  }
+
+  .labels-container {
+    margin-top: 0.5rem;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .labels-list {
+    margin: 0.5rem 0 0 0;
+    padding-left: 1.5rem;
+    list-style-type: disc;
+  }
+
+  .label-item {
+    margin: 0.25rem 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-all;
+  }
+
+  .label-value {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-all;
+    font-family: monospace;
+    font-size: 0.9em;
   }
 </style>

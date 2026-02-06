@@ -38,6 +38,13 @@ func getDockerClient() *http.Client {
 	return dockerClient
 }
 
+type DeployResources struct {
+	CPULimit          string `json:"CPULimit,omitempty"`
+	MemoryLimit       string `json:"MemoryLimit,omitempty"`
+	CPUReservation    string `json:"CPUReservation,omitempty"`
+	MemoryReservation string `json:"MemoryReservation,omitempty"`
+}
+
 type Container struct {
 	ID             string            `json:"ID"`
 	Name           string            `json:"Name"`
@@ -52,6 +59,7 @@ type Container struct {
 	Restart        bool              `json:"Restart"`
 	Labels         map[string]string `json:"Labels"`
 	ComposeProject string            `json:"ComposeProject,omitempty"`
+	DeployResources *DeployResources `json:"DeployResources,omitempty"`
 }
 
 type dockerAPIContainer struct {
@@ -82,6 +90,13 @@ type dockerContainerInspect struct {
 		Labels map[string]string `json:"Labels"`
 		Image  string            `json:"Image"`
 	} `json:"Config"`
+	HostConfig struct {
+		Memory            int64 `json:"Memory"`
+		MemoryReservation int64 `json:"MemoryReservation"`
+		CpuQuota          int64 `json:"CpuQuota"`
+		CpuPeriod         int64 `json:"CpuPeriod"`
+		NanoCpus          int64 `json:"NanoCpus"`
+	} `json:"HostConfig"`
 }
 
 type dockerImageInspect struct {
@@ -121,6 +136,70 @@ func filterLabels(labels map[string]string) map[string]string {
 
 	// Если ничего не указано, возвращаем все labels
 	return labels
+}
+
+func formatMemory(bytes int64) string {
+	if bytes == 0 {
+		return ""
+	}
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+	if bytes >= GB {
+		return fmt.Sprintf("%.1fG", float64(bytes)/float64(GB))
+	}
+	if bytes >= MB {
+		return fmt.Sprintf("%.1fM", float64(bytes)/float64(MB))
+	}
+	if bytes >= KB {
+		return fmt.Sprintf("%.1fK", float64(bytes)/float64(KB))
+	}
+	return fmt.Sprintf("%dB", bytes)
+}
+
+func formatCPU(quota, period, nanoCpus int64) string {
+	if nanoCpus > 0 {
+		// NanoCpus представляет CPU в наносекундах (1 CPU = 1e9 nanoseconds)
+		cpus := float64(nanoCpus) / 1e9
+		return fmt.Sprintf("%.1f", cpus)
+	}
+	if quota > 0 && period > 0 {
+		// CpuQuota / CpuPeriod дает количество CPU
+		cpus := float64(quota) / float64(period)
+		return fmt.Sprintf("%.1f", cpus)
+	}
+	return ""
+}
+
+func parseResources(inspect dockerContainerInspect) *DeployResources {
+	resources := &DeployResources{}
+
+	// Parse CPU limit
+	resources.CPULimit = formatCPU(
+		inspect.HostConfig.CpuQuota,
+		inspect.HostConfig.CpuPeriod,
+		inspect.HostConfig.NanoCpus,
+	)
+
+	// Parse Memory limit
+	resources.MemoryLimit = formatMemory(inspect.HostConfig.Memory)
+
+	// Parse CPU reservation (same logic as limit, but typically not set separately in HostConfig)
+	// For now, we'll leave it empty unless there's a specific field
+	resources.CPUReservation = ""
+
+	// Parse Memory reservation
+	resources.MemoryReservation = formatMemory(inspect.HostConfig.MemoryReservation)
+
+	// Return nil if no resources are set
+	if resources.CPULimit == "" && resources.MemoryLimit == "" &&
+		resources.CPUReservation == "" && resources.MemoryReservation == "" {
+		return nil
+	}
+
+	return resources
 }
 
 func GetContainers() ([]Container, error) {
@@ -261,6 +340,9 @@ func GetContainers() ([]Container, error) {
 				}
 			}
 
+			// Парсим ресурсы deploy
+			deployResources := parseResources(inspect)
+
 			resultChan <- containerResult{
 				container: Container{
 					ID:             shortID,
@@ -276,6 +358,7 @@ func GetContainers() ([]Container, error) {
 					Restart:        restart,
 					Labels:         filteredLabels,
 					ComposeProject: composeProject,
+					DeployResources: deployResources,
 				},
 				index: idx,
 			}
