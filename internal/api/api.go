@@ -29,6 +29,8 @@ func RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/api/containers", getContainersHandler).Methods("GET")
 	// WebSocket эндпоинт для контейнеров
 	r.HandleFunc("/ws/containers", containersWebSocketHandler)
+	// WebSocket эндпоинт для метрик контейнеров
+	r.HandleFunc("/ws/containers/stats", containersStatsWebSocketHandler)
 	// Новый эндпоинт для системных метрик
 	r.HandleFunc("/api/hostinfo", getHostInfoHandler).Methods("GET")
 	// WebSocket эндпоинт для hostinfo
@@ -472,4 +474,54 @@ func containerRestartWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Docker API returned status %d: %s", resp.StatusCode, string(body))
 	conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to restart container: " + string(body)})
+}
+
+func containersStatsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	// Канал для обработки закрытия соединения клиентом
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Обновляем метрики каждые 5 секунд
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Отправляем данные сразу при подключении
+	sendContainersStatsData(conn)
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := sendContainersStatsData(conn); err != nil {
+				log.Printf("WebSocket write error: %v", err)
+				return
+			}
+		}
+	}
+}
+
+func sendContainersStatsData(conn *websocket.Conn) error {
+	stats, err := containers.GetContainersStats()
+	if err != nil {
+		log.Printf("Failed to get containers stats: %v", err)
+		return err
+	}
+
+	return conn.WriteJSON(stats)
 }

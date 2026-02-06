@@ -7,6 +7,8 @@
   let hostinfo = null;
   let ws = null;
   let wsHostInfo = null;
+  let wsStats = null;
+  let containerStats = new Map(); // Map<containerID, {cpu: number, memory: number}>
   let containerGroups = [];
   let filterText = "";
   let selectedGroup = null; // null означает "все группы"
@@ -186,6 +188,46 @@
     };
   }
 
+  function connectStatsWebSocket() {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}${window.location.pathname}ws/containers/stats`;
+
+    wsStats = new WebSocket(wsUrl);
+
+    wsStats.onopen = () => {
+      console.log("Stats WebSocket connected");
+    };
+
+    wsStats.onmessage = (event) => {
+      try {
+        const stats = JSON.parse(event.data);
+        // Обновляем Map с метриками
+        const newStats = new Map();
+        if (Array.isArray(stats)) {
+          stats.forEach((stat) => {
+            newStats.set(stat.ID, {
+              cpu: stat.CPUUsage || 0,
+              memory: stat.MemoryUsage || 0,
+            });
+          });
+        }
+        containerStats = newStats;
+      } catch (error) {
+        console.error("Error parsing stats WebSocket message:", error);
+      }
+    };
+
+    wsStats.onerror = (error) => {
+      console.error("Stats WebSocket error:", error);
+    };
+
+    wsStats.onclose = () => {
+      console.log("Stats WebSocket disconnected, reconnecting...");
+      // Переподключение через 2 секунды
+      setTimeout(connectStatsWebSocket, 2000);
+    };
+  }
+
   function openLogsModal(containerId, containerName) {
     logsContainerId = containerId;
     logsContainerName = containerName;
@@ -329,6 +371,7 @@
   onMount(() => {
     connectWebSocket();
     connectHostInfoWebSocket();
+    connectStatsWebSocket();
     window.addEventListener("keydown", handleEscapeKey);
     checkMobile();
 
@@ -392,6 +435,9 @@
     }
     if (wsHostInfo) {
       wsHostInfo.close();
+    }
+    if (wsStats) {
+      wsStats.close();
     }
     if (wsLogs) {
       wsLogs.close();
@@ -818,6 +864,12 @@
             {/if}
             <div class="group-containers">
               {#each group.containers as container (container.ID)}
+                {@const stats = containerStats.get(container.ID)}
+                {@const hasCpuLimit = container.DeployResources && (container.DeployResources.CPULimit || container.DeployResources.CPUReservation)}
+                {@const hasMemLimit = container.DeployResources && (container.DeployResources.MemoryLimit || container.DeployResources.MemoryReservation)}
+                {@const hasCpuStats = stats && stats.cpu > 0}
+                {@const hasMemStats = stats && stats.memory > 0}
+                {@const showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats}
                 <div
                   class="card"
                   class:unhealthy={container.Health === "unhealthy"}
@@ -850,9 +902,9 @@
                       {/if}
                     </div>
                   </div>
-                  {#if container.DeployResources}
+                  {#if showResources}
                     <div class="resources-graphs">
-                      {#if container.DeployResources.CPULimit || container.DeployResources.CPUReservation}
+                      {#if hasCpuLimit}
                         {@const cpuLimit = parseCPU(
                           container.DeployResources.CPULimit || "0",
                         )}
@@ -872,14 +924,22 @@
                           cpuMax > 0 && cpuLimit > 0
                             ? (cpuLimit / cpuMax) * 100
                             : 0}
+                        {@const cpuUsage = stats ? stats.cpu : 0}
+                        {@const usagePercent =
+                          cpuMax > 0 && cpuUsage > 0
+                            ? (cpuUsage / cpuMax) * 100
+                            : 0}
+                        {@const usagePercentCapped = Math.min(usagePercent, 100)}
                         <div class="resource-item">
                           <div class="resource-label">
                             <span class="resource-title">CPU</span>
                             <span class="resource-value">
-                              {cpuReservation > 0
-                                ? cpuReservation.toFixed(1)
-                                : cpuLimit.toFixed(1)} cores
-                              {cpuLimit > 0 ? ` (limit)` : ""}
+                              {cpuUsage > 0 && cpuLimit > 0
+                                ? `${cpuUsage.toFixed(1)} / ${cpuLimit.toFixed(1)} cores (${usagePercent.toFixed(1)}%)`
+                                : cpuReservation > 0
+                                  ? `${cpuReservation.toFixed(1)} cores`
+                                  : cpuLimit.toFixed(1) + " cores"}
+                              {cpuLimit > 0 && cpuUsage === 0 ? ` (limit)` : ""}
                             </span>
                           </div>
                           <div class="progress-bar-container">
@@ -896,11 +956,35 @@
                                   style="width: {limitPercent}%"
                                 ></div>
                               {/if}
+                              {#if cpuUsage > 0 && cpuMax > 0}
+                                <div
+                                  class="progress-fill usage"
+                                  style="width: {usagePercentCapped}%"
+                                ></div>
+                              {/if}
+                            </div>
+                          </div>
+                        </div>
+                      {:else if hasCpuStats}
+                        {@const cpuUsage = stats ? stats.cpu : 0}
+                        <div class="resource-item">
+                          <div class="resource-label">
+                            <span class="resource-title">CPU</span>
+                            <span class="resource-value">
+                              {cpuUsage.toFixed(1)} cores
+                            </span>
+                          </div>
+                          <div class="progress-bar-container">
+                            <div class="progress-bar no-limit">
+                              <div
+                                class="progress-fill no-limit-fill"
+                                style="width: 100%"
+                              ></div>
                             </div>
                           </div>
                         </div>
                       {/if}
-                      {#if container.DeployResources.MemoryLimit || container.DeployResources.MemoryReservation}
+                      {#if hasMemLimit}
                         {@const memLimitMB = parseMemory(
                           container.DeployResources.MemoryLimit || "0",
                         )}
@@ -920,16 +1004,25 @@
                           memMax > 0 && memLimitMB > 0
                             ? (memLimitMB / memMax) * 100
                             : 0}
+                        {@const memUsageBytes = stats ? stats.memory : 0}
+                        {@const memUsageMB = memUsageBytes / (1024 * 1024)}
+                        {@const usagePercent =
+                          memMax > 0 && memUsageMB > 0
+                            ? (memUsageMB / memMax) * 100
+                            : 0}
+                        {@const usagePercentCapped = Math.min(usagePercent, 100)}
                         <div class="resource-item">
                           <div class="resource-label">
                             <span class="resource-title">Memory</span>
                             <span class="resource-value">
-                              {memReservationMB > 0
-                                ? formatMemory(memReservationMB)
-                                : formatMemory(memLimitMB)}
-                              {memLimitMB > 0 && memReservationMB > 0
+                              {memUsageMB > 0 && memLimitMB > 0
+                                ? `${formatMemory(memUsageMB)} / ${formatMemory(memLimitMB)} (${usagePercent.toFixed(1)}%)`
+                                : memReservationMB > 0
+                                  ? formatMemory(memReservationMB)
+                                  : formatMemory(memLimitMB)}
+                              {memLimitMB > 0 && memReservationMB > 0 && memUsageMB === 0
                                 ? ` / ${formatMemory(memLimitMB)}`
-                                : memLimitMB > 0
+                                : memLimitMB > 0 && memUsageMB === 0
                                   ? ` (limit: ${formatMemory(memLimitMB)})`
                                   : ""}
                             </span>
@@ -948,6 +1041,31 @@
                                   style="width: {limitPercent}%"
                                 ></div>
                               {/if}
+                              {#if memUsageMB > 0 && memMax > 0}
+                                <div
+                                  class="progress-fill usage"
+                                  style="width: {usagePercentCapped}%"
+                                ></div>
+                              {/if}
+                            </div>
+                          </div>
+                        </div>
+                      {:else if hasMemStats}
+                        {@const memUsageBytes = stats ? stats.memory : 0}
+                        {@const memUsageMB = memUsageBytes / (1024 * 1024)}
+                        <div class="resource-item">
+                          <div class="resource-label">
+                            <span class="resource-title">Memory</span>
+                            <span class="resource-value">
+                              {formatMemory(memUsageMB)}
+                            </span>
+                          </div>
+                          <div class="progress-bar-container">
+                            <div class="progress-bar no-limit">
+                              <div
+                                class="progress-fill no-limit-fill"
+                                style="width: 100%"
+                              ></div>
                             </div>
                           </div>
                         </div>
@@ -1246,6 +1364,12 @@
     overflow: hidden;
   }
 
+  .progress-bar.no-limit {
+    background-color: transparent;
+    border: 1px solid #9e9e9e;
+    border-radius: 5px;
+  }
+
   .progress-fill {
     position: absolute;
     top: 0;
@@ -1265,6 +1389,17 @@
     opacity: 0.5;
     z-index: 2;
     border-right: 2px solid #1976d2;
+  }
+
+  .progress-fill.usage {
+    background-color: #4caf50;
+    z-index: 3;
+    opacity: 0.9;
+  }
+
+  .progress-fill.no-limit-fill {
+    background-color: #ffffff;
+    z-index: 1;
   }
 
   .resource-value {

@@ -104,6 +104,33 @@ type dockerImageInspect struct {
 	RepoTags []string `json:"RepoTags"`
 }
 
+type dockerStats struct {
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64   `json:"total_usage"`
+			Percpu     []uint64 `json:"percpu_usage,omitempty"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+		OnlineCPUs      uint32 `json:"online_cpus"`
+	} `json:"cpu_stats"`
+	PreCPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+	} `json:"precpu_stats"`
+	MemoryStats struct {
+		Usage uint64 `json:"usage"`
+		Limit uint64 `json:"limit"`
+	} `json:"memory_stats"`
+}
+
+type ContainerStats struct {
+	ID          string  `json:"ID"`
+	CPUUsage    float64 `json:"CPUUsage"`    // CPU usage in cores
+	MemoryUsage int64   `json:"MemoryUsage"` // Memory usage in bytes
+}
+
 func filterLabels(labels map[string]string) map[string]string {
 	if labels == nil {
 		return nil
@@ -383,6 +410,132 @@ func GetContainers() ([]Container, error) {
 	for _, res := range results {
 		if res != nil {
 			result = append(result, *res)
+		}
+	}
+
+	return result, nil
+}
+
+// GetContainerStats получает статистику использования CPU и RAM для контейнера
+func GetContainerStats(containerID string) (*ContainerStats, error) {
+	client := getDockerClient()
+	statsURL := fmt.Sprintf("http://unix/containers/%s/stats?stream=false&one-shot=true", containerID)
+	
+	resp, err := client.Get(statsURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stats: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("docker stats API returned status %d", resp.StatusCode)
+	}
+
+	var stats dockerStats
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("failed to decode stats: %w", err)
+	}
+
+	// Вычисляем CPU usage в ядрах
+	var cpuCores float64
+	
+	// Проверяем, что есть данные для вычисления дельты
+	if stats.PreCPUStats.SystemCPUUsage > 0 && stats.CPUStats.SystemCPUUsage > stats.PreCPUStats.SystemCPUUsage {
+		cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
+		systemDelta := float64(stats.CPUStats.SystemCPUUsage - stats.PreCPUStats.SystemCPUUsage)
+		
+		if systemDelta > 0 && stats.CPUStats.OnlineCPUs > 0 {
+			// Вычисляем процент использования CPU
+			cpuPercent := (cpuDelta / systemDelta) * float64(stats.CPUStats.OnlineCPUs) * 100.0
+			// Конвертируем процент в количество ядер
+			cpuCores = cpuPercent / 100.0
+			// Ограничиваем количеством доступных ядер
+			if cpuCores > float64(stats.CPUStats.OnlineCPUs) {
+				cpuCores = float64(stats.CPUStats.OnlineCPUs)
+			}
+			// Не показываем отрицательные значения
+			if cpuCores < 0 {
+				cpuCores = 0
+			}
+		}
+	}
+
+	// Получаем использование памяти
+	memoryUsage := int64(stats.MemoryStats.Usage)
+
+	return &ContainerStats{
+		ID:          containerID,
+		CPUUsage:    cpuCores,
+		MemoryUsage: memoryUsage,
+	}, nil
+}
+
+// GetContainersStats получает статистику для всех запущенных контейнеров
+func GetContainersStats() ([]ContainerStats, error) {
+	client := getDockerClient()
+	url := "http://unix/containers/json?all=1"
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get containers list: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("docker API status %d", resp.StatusCode)
+	}
+
+	var apiContainers []dockerAPIContainer
+	if err := json.NewDecoder(resp.Body).Decode(&apiContainers); err != nil {
+		return nil, fmt.Errorf("failed to decode containers: %w", err)
+	}
+
+	type statsResult struct {
+		stats *ContainerStats
+		err   error
+	}
+
+	statsChan := make(chan statsResult, len(apiContainers))
+	var wg sync.WaitGroup
+
+	for _, apiContainer := range apiContainers {
+		// Получаем статистику только для запущенных контейнеров
+		if apiContainer.State != "running" {
+			continue
+		}
+
+		wg.Add(1)
+		go func(containerID string) {
+			defer wg.Done()
+			// Используем полный ID для получения статистики
+			stats, err := GetContainerStats(containerID)
+			if err != nil {
+				// Игнорируем ошибки для остановленных контейнеров
+				if strings.Contains(err.Error(), "No such container") ||
+					strings.Contains(err.Error(), "is not running") {
+					return
+				}
+				log.Printf("[docker-dashboard] Failed to get stats for container %s: %v", containerID, err)
+				return
+			}
+			// Используем короткий ID для совместимости с фронтендом
+			if len(containerID) > 12 {
+				stats.ID = containerID[:12]
+			} else {
+				stats.ID = containerID
+			}
+			statsChan <- statsResult{stats: stats, err: nil}
+		}(apiContainer.ID)
+	}
+
+	go func() {
+		wg.Wait()
+		close(statsChan)
+	}()
+
+	var result []ContainerStats
+	for res := range statsChan {
+		if res.stats != nil {
+			result = append(result, *res.stats)
 		}
 	}
 
