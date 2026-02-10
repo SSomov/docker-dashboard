@@ -11,6 +11,7 @@ import (
 
 type SystemMetrics struct {
 	CPU       []float64                  `json:"cpu"`
+	CPUCount  int                        `json:"cpu_count"`
 	Memory    *mem.VirtualMemoryStat     `json:"memory"`
 	Disk      []disk.PartitionStat       `json:"disk_partitions"`
 	DiskUsage map[string]*disk.UsageStat `json:"disk_usage"`
@@ -21,6 +22,10 @@ type SystemMetrics struct {
 
 func GetSystemMetrics() (*SystemMetrics, error) {
 	cpuPercent, err := cpu.Percent(0, false)
+	if err != nil {
+		return nil, err
+	}
+	cpuCount, err := cpu.Counts(true)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +59,7 @@ func GetSystemMetrics() (*SystemMetrics, error) {
 
 	return &SystemMetrics{
 		CPU:       cpuPercent,
+		CPUCount:  cpuCount,
 		Memory:    memStat,
 		Disk:      partitions,
 		DiskUsage: diskUsage,

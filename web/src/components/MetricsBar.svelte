@@ -78,7 +78,13 @@ function handleToggle() {
     >
       <span>
         <b>CPU:</b>
-        {getCpuPercent(hostinfo.cpu).toFixed(1)}%
+        {#if hostinfo.cpu_count > 0}
+          {@const cpuPercent = getCpuPercent(hostinfo.cpu)}
+          {@const cpuUsed = (cpuPercent / 100) * hostinfo.cpu_count}
+          {cpuUsed.toFixed(1)} / {hostinfo.cpu_count} cores ({cpuPercent.toFixed(1)}%)
+        {:else}
+          {getCpuPercent(hostinfo.cpu).toFixed(1)}%
+        {/if}
         <div class="mini-progress">
           <div
             class="mini-progress-bar cpu"

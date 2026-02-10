@@ -48,8 +48,8 @@ $: hasMemLimit =
 	container.DeployResources &&
 	(container.DeployResources.MemoryLimit ||
 		container.DeployResources.MemoryReservation);
-$: hasCpuStats = stats && typeof stats.cpu !== "undefined" && stats.cpu !== null;
-$: hasMemStats = stats && typeof stats.memory !== "undefined" && stats.memory !== null;
+$: hasCpuStats = stats && typeof stats.cpu === "number";
+$: hasMemStats = stats && typeof stats.memory === "number";
 $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
 </script>
 
@@ -100,21 +100,16 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                         : 0}
                 {@const limitPercent =
                     cpuMax > 0 && cpuLimit > 0 ? (cpuLimit / cpuMax) * 100 : 0}
-                {@const cpuUsage = stats ? stats.cpu : 0}
+                {@const cpuUsage = stats ? (stats.cpu || 0) : 0}
                 {@const usagePercent =
-                    cpuMax > 0 && cpuUsage > 0 ? (cpuUsage / cpuMax) * 100 : 0}
+                    cpuMax > 0 && cpuUsage >= 0 ? (cpuUsage / cpuMax) * 100 : 0}
                 {@const usagePercentCapped = Math.min(usagePercent, 100)}
                 <div class="resource-item">
                     <div class="resource-label">
                         <span class="resource-title">CPU</span>
                         <span class="resource-value">
-                            {cpuUsage > 0 && cpuLimit > 0
-                                ? `${cpuUsage.toFixed(1)} / ${cpuLimit.toFixed(1)} cores (${usagePercent.toFixed(1)}%)`
-                                : cpuReservation > 0 && cpuLimit > 0
-                                  ? `${cpuReservation.toFixed(1)} / ${cpuLimit.toFixed(1)} cores`
-                                  : cpuReservation > 0
-                                    ? `${cpuReservation.toFixed(1)} cores`
-                                    : cpuLimit.toFixed(1) + " cores"}
+                            {cpuUsage.toFixed(2)} / {cpuReservation.toFixed(1)} / {cpuLimit.toFixed(1)} cores
+                            {usagePercent > 0 ? ` (${usagePercent.toFixed(1)}%)` : ""}
                         </span>
                     </div>
                     <div class="progress-bar-container">
@@ -131,7 +126,7 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                                     style="width: {limitPercent}%"
                                 ></div>
                             {/if}
-                            {#if cpuUsage > 0 && cpuMax > 0}
+                            {#if stats && cpuMax > 0}
                                 <div
                                     class="progress-fill usage"
                                     style="width: {usagePercentCapped}%"
@@ -141,12 +136,12 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                     </div>
                 </div>
             {:else if hasCpuStats}
-                {@const cpuUsage = stats ? stats.cpu : 0}
+                {@const cpuUsage = stats ? (stats.cpu || 0) : 0}
                 <div class="resource-item">
                     <div class="resource-label">
                         <span class="resource-title">CPU</span>
                         <span class="resource-value">
-                            {cpuUsage.toFixed(1)} cores
+                            {cpuUsage.toFixed(2)} cores
                         </span>
                     </div>
                     <div class="progress-bar-container">
@@ -179,10 +174,10 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                     memMax > 0 && memLimitMB > 0
                         ? (memLimitMB / memMax) * 100
                         : 0}
-                {@const memUsageBytes = stats ? stats.memory : 0}
+                {@const memUsageBytes = stats ? (stats.memory || 0) : 0}
                 {@const memUsageMB = memUsageBytes / (1024 * 1024)}
                 {@const usagePercent =
-                    memMax > 0 && memUsageMB > 0
+                    memMax > 0 && memUsageMB >= 0
                         ? (memUsageMB / memMax) * 100
                         : 0}
                 {@const usagePercentCapped = Math.min(usagePercent, 100)}
@@ -190,13 +185,8 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                     <div class="resource-label">
                         <span class="resource-title">Memory</span>
                         <span class="resource-value">
-                            {memUsageMB > 0 && memLimitMB > 0
-                                ? `${formatMemory(memUsageMB)} / ${formatMemory(memLimitMB)} (${usagePercent.toFixed(1)}%)`
-                                : memReservationMB > 0 && memLimitMB > 0
-                                  ? `${formatMemory(memReservationMB)} / ${formatMemory(memLimitMB)}`
-                                  : memReservationMB > 0
-                                    ? formatMemory(memReservationMB)
-                                    : formatMemory(memLimitMB)}
+                            {formatMemory(memUsageMB)} / {formatMemory(memReservationMB)} / {formatMemory(memLimitMB)}
+                            {usagePercent > 0 ? ` (${usagePercent.toFixed(1)}%)` : ""}
                         </span>
                     </div>
                     <div class="progress-bar-container">
@@ -213,7 +203,7 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                                     style="width: {limitPercent}%"
                                 ></div>
                             {/if}
-                            {#if memUsageMB > 0 && memMax > 0}
+                            {#if stats && memMax > 0}
                                 <div
                                     class="progress-fill usage"
                                     style="width: {usagePercentCapped}%"
@@ -223,7 +213,7 @@ $: showResources = hasCpuLimit || hasMemLimit || hasCpuStats || hasMemStats;
                     </div>
                 </div>
             {:else if hasMemStats}
-                {@const memUsageBytes = stats ? stats.memory : 0}
+                {@const memUsageBytes = stats ? (stats.memory || 0) : 0}
                 {@const memUsageMB = memUsageBytes / (1024 * 1024)}
                 <div class="resource-item">
                     <div class="resource-label">

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,71 @@ var (
 	dockerClient     *http.Client
 	dockerClientOnce sync.Once
 )
+
+// Кэш для результатов GetContainers
+type containersCache struct {
+	data      []Container
+	expiresAt time.Time
+	mu        sync.RWMutex
+}
+
+var (
+	containersCacheInstance *containersCache
+	containersCacheOnce     sync.Once
+)
+
+// Семафор для ограничения параллелизма запросов к Docker API
+var (
+	requestSemaphore chan struct{}
+	semaphoreOnce     sync.Once
+)
+
+func initSemaphore() {
+	semaphoreOnce.Do(func() {
+		maxConcurrent := 15 // По умолчанию 15 одновременных запросов
+		if envMax := os.Getenv("DOCKER_API_MAX_CONCURRENT"); envMax != "" {
+			if parsed, err := strconv.Atoi(envMax); err == nil && parsed > 0 {
+				maxConcurrent = parsed
+			}
+		}
+		requestSemaphore = make(chan struct{}, maxConcurrent)
+		log.Printf("[docker-dashboard] Initialized Docker API semaphore with max concurrent requests: %d", maxConcurrent)
+	})
+}
+
+func getContainersCache() *containersCache {
+	containersCacheOnce.Do(func() {
+		containersCacheInstance = &containersCache{}
+	})
+	return containersCacheInstance
+}
+
+func (c *containersCache) get() ([]Container, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.data == nil || time.Now().After(c.expiresAt) {
+		return nil, false
+	}
+	// Возвращаем копию данных
+	result := make([]Container, len(c.data))
+	copy(result, c.data)
+	return result, true
+}
+
+func (c *containersCache) set(data []Container, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data = make([]Container, len(data))
+	copy(c.data, data)
+	c.expiresAt = time.Now().Add(ttl)
+}
+
+func (c *containersCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data = nil
+	c.expiresAt = time.Time{}
+}
 
 func getDockerClient() *http.Client {
 	dockerClientOnce.Do(func() {
@@ -230,6 +296,17 @@ func parseResources(inspect dockerContainerInspect) *DeployResources {
 }
 
 func GetContainers() ([]Container, error) {
+	// Инициализируем семафор
+	initSemaphore()
+
+	// Проверяем кэш
+	cache := getContainersCache()
+	cacheTTL := 2 * time.Second // TTL кэша 2 секунды
+	if cached, ok := cache.get(); ok {
+		log.Printf("[docker-dashboard] GetContainers: returning cached data")
+		return cached, nil
+	}
+
 	debug := false
 	if os.Getenv("DEBUG") == "true" {
 		debug = true
@@ -241,6 +318,7 @@ func GetContainers() ([]Container, error) {
 	resp, err := client.Get(url)
 	if err != nil {
 		log.Printf("[docker-dashboard] http.Get error: %v", err)
+		cache.clear() // Очищаем кэш при ошибке
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -248,17 +326,20 @@ func GetContainers() ([]Container, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("[docker-dashboard] read body error: %v", err)
+		cache.clear()
 		return nil, err
 	}
 	if debug {
 		log.Printf("[docker-dashboard] raw body: %s", string(body))
 	}
 	if resp.StatusCode != 200 {
+		cache.clear()
 		return nil, fmt.Errorf("docker API status %d", resp.StatusCode)
 	}
 	var apiContainers []dockerAPIContainer
 	if err := json.Unmarshal(body, &apiContainers); err != nil {
 		log.Printf("[docker-dashboard] json.Unmarshal error: %v", err)
+		cache.clear()
 		return nil, err
 	}
 	log.Printf("[docker-dashboard] containers found: %d", len(apiContainers))
@@ -276,6 +357,10 @@ func GetContainers() ([]Container, error) {
 		wg.Add(1)
 		go func(idx int, container dockerAPIContainer) {
 			defer wg.Done()
+
+			// Ограничиваем параллелизм через семафор
+			requestSemaphore <- struct{}{} // Захватываем семафор
+			defer func() { <-requestSemaphore }() // Освобождаем семафор
 
 			name := ""
 			if len(container.Names) > 0 {
@@ -312,6 +397,7 @@ func GetContainers() ([]Container, error) {
 			}
 
 			if container.ImageID != "" && tagCommit == "" {
+				// Запрос образа выполняется в той же горутине, семафор уже захвачен
 				imageURL := fmt.Sprintf("http://unix/images/%s/json", container.ImageID)
 				imageResp, err := client.Get(imageURL)
 				if err == nil {
@@ -413,45 +499,72 @@ func GetContainers() ([]Container, error) {
 		}
 	}
 
+	// Сохраняем в кэш только при успешном результате
+	if len(result) > 0 || len(apiContainers) == 0 {
+		cache.set(result, cacheTTL)
+	} else {
+		cache.clear()
+	}
+
 	return result, nil
 }
 
 // GetContainerStats получает статистику использования CPU и RAM для контейнера
 func GetContainerStats(containerID string) (*ContainerStats, error) {
 	client := getDockerClient()
-	statsURL := fmt.Sprintf("http://unix/containers/%s/stats?stream=false&one-shot=true", containerID)
 	
-	resp, err := client.Get(statsURL)
+	// Делаем первый запрос для получения базовой статистики
+	statsURL1 := fmt.Sprintf("http://unix/containers/%s/stats?stream=false&one-shot=true", containerID)
+	resp1, err := client.Get(statsURL1)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get stats: %w", err)
+		return nil, fmt.Errorf("failed to get first stats: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp1.Body.Close()
 
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("docker stats API returned status %d", resp.StatusCode)
-	}
-
-	var stats dockerStats
-	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
-		return nil, fmt.Errorf("failed to decode stats: %w", err)
+	if resp1.StatusCode != 200 {
+		return nil, fmt.Errorf("docker stats API returned status %d", resp1.StatusCode)
 	}
 
-	// Вычисляем CPU usage в ядрах
+	var stats1 dockerStats
+	if err := json.NewDecoder(resp1.Body).Decode(&stats1); err != nil {
+		return nil, fmt.Errorf("failed to decode first stats: %w", err)
+	}
+
+	// Ждем 1 секунду для получения дельты CPU
+	time.Sleep(1 * time.Second)
+
+	// Делаем второй запрос
+	statsURL2 := fmt.Sprintf("http://unix/containers/%s/stats?stream=false&one-shot=true", containerID)
+	resp2, err := client.Get(statsURL2)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get second stats: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != 200 {
+		return nil, fmt.Errorf("docker stats API returned status %d", resp2.StatusCode)
+	}
+
+	var stats2 dockerStats
+	if err := json.NewDecoder(resp2.Body).Decode(&stats2); err != nil {
+		return nil, fmt.Errorf("failed to decode second stats: %w", err)
+	}
+
+	// Вычисляем CPU usage в ядрах используя два снимка
 	var cpuCores float64
 	
-	// Проверяем, что есть данные для вычисления дельты
-	if stats.PreCPUStats.SystemCPUUsage > 0 && stats.CPUStats.SystemCPUUsage > stats.PreCPUStats.SystemCPUUsage {
-		cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
-		systemDelta := float64(stats.CPUStats.SystemCPUUsage - stats.PreCPUStats.SystemCPUUsage)
+	if stats1.CPUStats.SystemCPUUsage > 0 && stats2.CPUStats.SystemCPUUsage > stats1.CPUStats.SystemCPUUsage {
+		cpuDelta := float64(stats2.CPUStats.CPUUsage.TotalUsage - stats1.CPUStats.CPUUsage.TotalUsage)
+		systemDelta := float64(stats2.CPUStats.SystemCPUUsage - stats1.CPUStats.SystemCPUUsage)
 		
-		if systemDelta > 0 && stats.CPUStats.OnlineCPUs > 0 {
+		if systemDelta > 0 && stats2.CPUStats.OnlineCPUs > 0 {
 			// Вычисляем процент использования CPU
-			cpuPercent := (cpuDelta / systemDelta) * float64(stats.CPUStats.OnlineCPUs) * 100.0
+			cpuPercent := (cpuDelta / systemDelta) * float64(stats2.CPUStats.OnlineCPUs) * 100.0
 			// Конвертируем процент в количество ядер
 			cpuCores = cpuPercent / 100.0
 			// Ограничиваем количеством доступных ядер
-			if cpuCores > float64(stats.CPUStats.OnlineCPUs) {
-				cpuCores = float64(stats.CPUStats.OnlineCPUs)
+			if cpuCores > float64(stats2.CPUStats.OnlineCPUs) {
+				cpuCores = float64(stats2.CPUStats.OnlineCPUs)
 			}
 			// Не показываем отрицательные значения
 			if cpuCores < 0 {
@@ -460,8 +573,8 @@ func GetContainerStats(containerID string) (*ContainerStats, error) {
 		}
 	}
 
-	// Получаем использование памяти
-	memoryUsage := int64(stats.MemoryStats.Usage)
+	// Получаем использование памяти из первого снимка (как было раньше)
+	memoryUsage := int64(stats1.MemoryStats.Usage)
 
 	return &ContainerStats{
 		ID:          containerID,

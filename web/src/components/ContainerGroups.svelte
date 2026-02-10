@@ -8,6 +8,7 @@
   export let onOpenLogs = (containerId, containerName) => {};
   export let onRestartContainer = (containerId, containerName) => {};
   export let loading = false;
+  export let loadingStatus = "Загрузка...";
   export let totalFixedHeight = 0;
 </script>
 
@@ -16,6 +17,7 @@
     <div class="container">
       <div class="loader-container">
         <div class="loader"></div>
+        <p class="loading-status">{loadingStatus}</p>
       </div>
     </div>
   {:else}
@@ -87,9 +89,18 @@
 
   .loader-container {
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     height: 100vh;
+    gap: 1rem;
+  }
+
+  .loading-status {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 1rem;
+    margin-top: 1rem;
+    text-align: center;
   }
 
   .container-group {

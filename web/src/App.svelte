@@ -16,6 +16,7 @@ const appVersion = __APP_VERSION__;
 let containers = [];
 let containersData = null;
 let loading = true;
+let loadingStatus = "Подключение к серверу..."; // Статус загрузки для отображения пользователю
 let hostinfo = null;
 let containerStats = new Map(); // Map<containerID, {cpu: number, memory: number}>
 let containerGroups = [];
@@ -174,66 +175,7 @@ const handleRestartContainer = (containerId, containerName) => {
 	});
 };
 
-onMount(() => {
-	// Подключение WebSocket для контейнеров
-	wsStore.connectContainersWebSocket({
-		onOpen: () => {
-			loading = false;
-		},
-		onMessage: (data) => {
-			containersData = data;
-			containers = data.containers || [];
-			// Используем группы из API, если они есть, иначе создаем одну группу из всех контейнеров
-			if (data.groups && data.groups.length > 0) {
-				containerGroups = data.groups;
-			} else {
-				// Fallback для обратной совместимости
-				containerGroups = [
-					{
-						project_name: "",
-						containers: containers,
-					},
-				];
-			}
-			// Обновляем значение logs_show из API
-			if (typeof data.logs_show !== "undefined") {
-				logsShow = data.logs_show;
-			}
-			// Обновляем значение container_restart из API
-			if (typeof data.container_restart !== "undefined") {
-				containerRestart = data.container_restart;
-			}
-			loading = false;
-		},
-		onError: () => {
-			loading = false;
-		},
-	});
-
-	// Подключение WebSocket для метрик хоста
-	wsStore.connectHostInfoWebSocket({
-		onMessage: (data) => {
-			hostinfo = data;
-		},
-	});
-
-	// Подключение WebSocket для статистики контейнеров
-	wsStore.connectStatsWebSocket({
-		onMessage: (stats) => {
-			// Обновляем Map с метриками
-			const newStats = new Map();
-			if (Array.isArray(stats)) {
-				stats.forEach((stat) => {
-					newStats.set(stat.ID, {
-						cpu: stat.CPUUsage || 0,
-						memory: stat.MemoryUsage || 0,
-					});
-				});
-			}
-			containerStats = newStats;
-		},
-	});
-
+onMount(async () => {
 	checkMobileDevice();
 	updateHeights();
 
@@ -251,6 +193,93 @@ onMount(() => {
 		updateHeights();
 	};
 	mediaQuery.addEventListener("change", handleMediaChange);
+
+	// Последовательное подключение WebSocket для оптимизации первой загрузки
+	try {
+		// 1. Сначала подключаем контейнеры и ждем первого сообщения
+		loadingStatus = "Загрузка контейнеров...";
+		const containersPromise = wsStore.connectContainersWebSocket({
+			onOpen: () => {
+				console.log("Containers WebSocket opened");
+			},
+			onMessage: (data) => {
+				containersData = data;
+				containers = data.containers || [];
+				// Используем группы из API, если они есть, иначе создаем одну группу из всех контейнеров
+				if (data.groups && data.groups.length > 0) {
+					containerGroups = data.groups;
+				} else {
+					// Fallback для обратной совместимости
+					containerGroups = [
+						{
+							project_name: "",
+							containers: containers,
+						},
+					];
+				}
+				// Обновляем значение logs_show из API
+				if (typeof data.logs_show !== "undefined") {
+					logsShow = data.logs_show;
+				}
+				// Обновляем значение container_restart из API
+				if (typeof data.container_restart !== "undefined") {
+					containerRestart = data.container_restart;
+				}
+				loading = false;
+			},
+			onError: () => {
+				loading = false;
+				loadingStatus = "Ошибка подключения";
+			},
+		});
+
+		// Ждем первого сообщения от контейнеров
+		await containersPromise;
+		console.log("Containers data loaded");
+
+		// 2. Затем подключаем hostinfo
+		loadingStatus = "Загрузка метрик системы...";
+		const hostinfoPromise = wsStore.connectHostInfoWebSocket({
+			onMessage: (data) => {
+				hostinfo = data;
+			},
+		});
+
+		// Ждем первого сообщения от hostinfo (не блокируем, но ждем)
+		await hostinfoPromise.catch(() => {
+			// Игнорируем ошибки, продолжаем работу
+		});
+		console.log("HostInfo data loaded");
+
+		// 3. В последнюю очередь подключаем stats (менее критично для первой загрузки)
+		loadingStatus = "Загрузка статистики контейнеров...";
+		const statsPromise = wsStore.connectStatsWebSocket({
+			onMessage: (stats) => {
+				// Обновляем Map с метриками
+				const newStats = new Map();
+				if (Array.isArray(stats)) {
+					stats.forEach((stat) => {
+						newStats.set(stat.ID, {
+							cpu: stat.CPUUsage || 0,
+							memory: stat.MemoryUsage || 0,
+						});
+					});
+				}
+				containerStats = newStats;
+			},
+		});
+
+		// Ждем первого сообщения от stats (не блокируем, но ждем)
+		await statsPromise.catch(() => {
+			// Игнорируем ошибки, продолжаем работу
+		});
+		console.log("Stats data loaded");
+		loadingStatus = "Готово";
+	} catch (error) {
+		console.error("Error during WebSocket initialization:", error);
+		loading = false;
+		loadingStatus = "Ошибка загрузки";
+	}
 });
 
 // Обновляем высоту при изменении hostinfo, групп или состояния свернутости
@@ -301,6 +330,7 @@ onDestroy(() => {
     {logsShow}
     {containerRestart}
     {loading}
+    {loadingStatus}
     {totalFixedHeight}
     onOpenLogs={openLogsModal}
     onRestartContainer={handleRestartContainer}

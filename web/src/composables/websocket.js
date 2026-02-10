@@ -13,6 +13,18 @@ export function createWebSocketStore() {
 
 		ws = new WebSocket(wsUrl);
 
+		let firstMessageReceived = false;
+		let firstMessageResolver = null;
+		const firstMessagePromise = new Promise((resolve, reject) => {
+			firstMessageResolver = resolve;
+			// Таймаут для первого сообщения (10 секунд)
+			setTimeout(() => {
+				if (!firstMessageReceived) {
+					reject(new Error("Timeout waiting for first message"));
+				}
+			}, 10000);
+		});
+
 		ws.onopen = () => {
 			console.log("WebSocket connected");
 			if (callbacks.onOpen) callbacks.onOpen();
@@ -21,14 +33,28 @@ export function createWebSocketStore() {
 		ws.onmessage = (event) => {
 			try {
 				const data = JSON.parse(event.data);
+				if (!firstMessageReceived) {
+					firstMessageReceived = true;
+					if (firstMessageResolver) {
+						firstMessageResolver(data);
+					}
+				}
 				if (callbacks.onMessage) callbacks.onMessage(data);
 			} catch (error) {
 				console.error("Error parsing WebSocket message:", error);
+				if (!firstMessageReceived && firstMessageResolver) {
+					firstMessageReceived = true;
+					firstMessageResolver(null);
+				}
 			}
 		};
 
 		ws.onerror = (error) => {
 			console.error("WebSocket error:", error);
+			if (!firstMessageReceived && firstMessageResolver) {
+				firstMessageReceived = true;
+				firstMessageResolver(null);
+			}
 			if (callbacks.onError) callbacks.onError(error);
 		};
 
@@ -38,12 +64,27 @@ export function createWebSocketStore() {
 			// Переподключение через 2 секунды
 			setTimeout(() => connectContainersWebSocket(callbacks), 2000);
 		};
+
+		// Возвращаем промис для первого сообщения
+		return firstMessagePromise;
 	}
 
 	function connectHostInfoWebSocket(callbacks) {
 		const wsUrl = getWebSocketUrl("ws/hostinfo");
 
 		wsHostInfo = new WebSocket(wsUrl);
+
+		let firstMessageReceived = false;
+		let firstMessageResolver = null;
+		const firstMessagePromise = new Promise((resolve, reject) => {
+			firstMessageResolver = resolve;
+			// Таймаут для первого сообщения (10 секунд)
+			setTimeout(() => {
+				if (!firstMessageReceived) {
+					reject(new Error("Timeout waiting for first message"));
+				}
+			}, 10000);
+		});
 
 		wsHostInfo.onopen = () => {
 			console.log("HostInfo WebSocket connected");
@@ -53,14 +94,28 @@ export function createWebSocketStore() {
 		wsHostInfo.onmessage = (event) => {
 			try {
 				const data = JSON.parse(event.data);
+				if (!firstMessageReceived) {
+					firstMessageReceived = true;
+					if (firstMessageResolver) {
+						firstMessageResolver(data);
+					}
+				}
 				if (callbacks.onMessage) callbacks.onMessage(data);
 			} catch (error) {
 				console.error("Error parsing hostinfo WebSocket message:", error);
+				if (!firstMessageReceived && firstMessageResolver) {
+					firstMessageReceived = true;
+					firstMessageResolver(null);
+				}
 			}
 		};
 
 		wsHostInfo.onerror = (error) => {
 			console.error("HostInfo WebSocket error:", error);
+			if (!firstMessageReceived && firstMessageResolver) {
+				firstMessageReceived = true;
+				firstMessageResolver(null);
+			}
 			if (callbacks.onError) callbacks.onError(error);
 		};
 
@@ -70,12 +125,27 @@ export function createWebSocketStore() {
 			// Переподключение через 2 секунды
 			setTimeout(() => connectHostInfoWebSocket(callbacks), 2000);
 		};
+
+		// Возвращаем промис для первого сообщения
+		return firstMessagePromise;
 	}
 
 	function connectStatsWebSocket(callbacks) {
 		const wsUrl = getWebSocketUrl("ws/containers/stats");
 
 		wsStats = new WebSocket(wsUrl);
+
+		let firstMessageReceived = false;
+		let firstMessageResolver = null;
+		const firstMessagePromise = new Promise((resolve, reject) => {
+			firstMessageResolver = resolve;
+			// Таймаут для первого сообщения (10 секунд)
+			setTimeout(() => {
+				if (!firstMessageReceived) {
+					reject(new Error("Timeout waiting for first message"));
+				}
+			}, 10000);
+		});
 
 		wsStats.onopen = () => {
 			console.log("Stats WebSocket connected");
@@ -85,14 +155,28 @@ export function createWebSocketStore() {
 		wsStats.onmessage = (event) => {
 			try {
 				const stats = JSON.parse(event.data);
+				if (!firstMessageReceived) {
+					firstMessageReceived = true;
+					if (firstMessageResolver) {
+						firstMessageResolver(stats);
+					}
+				}
 				if (callbacks.onMessage) callbacks.onMessage(stats);
 			} catch (error) {
 				console.error("Error parsing stats WebSocket message:", error);
+				if (!firstMessageReceived && firstMessageResolver) {
+					firstMessageReceived = true;
+					firstMessageResolver(null);
+				}
 			}
 		};
 
 		wsStats.onerror = (error) => {
 			console.error("Stats WebSocket error:", error);
+			if (!firstMessageReceived && firstMessageResolver) {
+				firstMessageReceived = true;
+				firstMessageResolver(null);
+			}
 			if (callbacks.onError) callbacks.onError(error);
 		};
 
@@ -102,6 +186,9 @@ export function createWebSocketStore() {
 			// Переподключение через 2 секунды
 			setTimeout(() => connectStatsWebSocket(callbacks), 2000);
 		};
+
+		// Возвращаем промис для первого сообщения
+		return firstMessagePromise;
 	}
 
 	function connectRestartWebSocket(containerId, callbacks) {
