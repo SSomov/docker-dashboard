@@ -24,6 +24,7 @@ let filterText = "";
 let selectedGroup = null; // null означает "все группы"
 let logsShow = false;
 let containerRestart = false;
+let viewMode = "tile"; // "tile" или "table"
 
 // Модальное окно для логов
 let logsModalOpen = false;
@@ -123,6 +124,10 @@ const handleToggleGroupTags = () => {
 	setTimeout(() => {
 		updateHeights();
 	}, 350); // Ждем завершения анимации
+};
+
+const handleViewModeChange = (mode) => {
+	viewMode = mode;
 };
 
 function updateHeights() {
@@ -311,7 +316,13 @@ onDestroy(() => {
     onToggle={handleToggleMetricsRow}
   />
 
-  <FilterBar bind:filterText {headerHeight} {metricsBarHeight} />
+  <FilterBar
+    bind:filterText
+    {headerHeight}
+    {metricsBarHeight}
+    {viewMode}
+    onViewModeChange={handleViewModeChange}
+  />
 
   <GroupTagsBar
     {allGroups}
@@ -332,6 +343,7 @@ onDestroy(() => {
     {loading}
     {loadingStatus}
     {totalFixedHeight}
+    {viewMode}
     onOpenLogs={openLogsModal}
     onRestartContainer={handleRestartContainer}
   />
