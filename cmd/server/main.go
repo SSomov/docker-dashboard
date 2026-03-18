@@ -2,24 +2,26 @@ package main
 
 import (
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"docker-dashboard/internal/api"
 
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo/v4"
 )
 
 func main() {
+	staticDir := filepath.Join("web", "public")
 	for {
-		r := mux.NewRouter()
-		api.RegisterRoutes(r)
+		e := echo.New()
+		api.RegisterRoutes(e)
 
-		// Serve static files from the "web/public" directory
-		staticDir := filepath.Join("web", "public")
-		r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir(staticDir))))
+		// Serve static files from "web/public"; SPA fallback: unknown paths serve index.html
+		e.Static("/", staticDir)
+		e.GET("/*", func(c echo.Context) error {
+			return c.File(filepath.Join(staticDir, "index.html"))
+		})
 
 		port := os.Getenv("PORT")
 		if port == "" {
@@ -27,7 +29,7 @@ func main() {
 		}
 		addr := ":" + port
 		log.Printf("Server started at http://localhost%s", addr)
-		err := http.ListenAndServe(addr, r)
+		err := e.Start(addr)
 		if err != nil {
 			log.Printf("Server error: %v", err)
 		}

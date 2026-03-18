@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -15,8 +14,8 @@ import (
 	"docker-dashboard/internal/containers"
 	"docker-dashboard/internal/hostinfo"
 
-	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/labstack/echo/v4"
 )
 
 var upgrader = websocket.Upgrader{
@@ -25,20 +24,14 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func RegisterRoutes(r *mux.Router) {
-	r.HandleFunc("/api/containers", getContainersHandler).Methods("GET")
-	// WebSocket эндпоинт для контейнеров
-	r.HandleFunc("/ws/containers", containersWebSocketHandler)
-	// WebSocket эндпоинт для метрик контейнеров
-	r.HandleFunc("/ws/containers/stats", containersStatsWebSocketHandler)
-	// Новый эндпоинт для системных метрик
-	r.HandleFunc("/api/hostinfo", getHostInfoHandler).Methods("GET")
-	// WebSocket эндпоинт для hostinfo
-	r.HandleFunc("/ws/hostinfo", hostinfoWebSocketHandler)
-	// WebSocket эндпоинт для логов контейнера
-	r.HandleFunc("/ws/containers/{id}/logs", containerLogsWebSocketHandler)
-	// WebSocket эндпоинт для перезагрузки контейнера
-	r.HandleFunc("/ws/containers/{id}/restart", containerRestartWebSocketHandler)
+func RegisterRoutes(e *echo.Echo) {
+	e.GET("/api/containers", getContainersHandler)
+	e.GET("/api/hostinfo", getHostInfoHandler)
+	e.GET("/ws/containers", containersWebSocketHandler)
+	e.GET("/ws/containers/stats", containersStatsWebSocketHandler)
+	e.GET("/ws/hostinfo", hostinfoWebSocketHandler)
+	e.GET("/ws/containers/:id/logs", containerLogsWebSocketHandler)
+	e.GET("/ws/containers/:id/restart", containerRestartWebSocketHandler)
 }
 
 type containerGroup struct {
@@ -136,31 +129,31 @@ func getContainerRestart() bool {
 	return value
 }
 
-func getContainersHandler(w http.ResponseWriter, r *http.Request) {
+func getContainersHandler(c echo.Context) error {
 	containerList, err := containers.GetContainers()
 	if err != nil {
-		http.Error(w, "Failed to get containers: "+err.Error(), http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get containers: "+err.Error())
 	}
 
 	response := containersResponse{
-		SnapshotTime:    time.Now(),
-		Total:           len(containerList),
-		Containers:      containerList,
-		Groups:          groupContainers(containerList),
-		LogsShow:        getLogsShow(),
+		SnapshotTime:     time.Now(),
+		Total:            len(containerList),
+		Containers:       containerList,
+		Groups:           groupContainers(containerList),
+		LogsShow:         getLogsShow(),
 		ContainerRestart: getContainerRestart(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return c.JSON(http.StatusOK, response)
 }
 
-func containersWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+func containersWebSocketHandler(c echo.Context) error {
+	w := c.Response().Writer
+	r := c.Request()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -185,11 +178,11 @@ func containersWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-done:
-			return
+			return nil
 		case <-ticker.C:
 			if err := sendContainersData(conn); err != nil {
 				log.Printf("WebSocket write error: %v", err)
-				return
+				return nil
 			}
 		}
 	}
@@ -214,21 +207,21 @@ func sendContainersData(conn *websocket.Conn) error {
 	return conn.WriteJSON(response)
 }
 
-func getHostInfoHandler(w http.ResponseWriter, r *http.Request) {
+func getHostInfoHandler(c echo.Context) error {
 	metrics, err := hostinfo.GetSystemMetrics()
 	if err != nil {
-		http.Error(w, "Failed to get system metrics", http.StatusInternalServerError)
-		return
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get system metrics")
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(metrics)
+	return c.JSON(http.StatusOK, metrics)
 }
 
-func hostinfoWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+func hostinfoWebSocketHandler(c echo.Context) error {
+	w := c.Response().Writer
+	r := c.Request()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -253,11 +246,11 @@ func hostinfoWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-done:
-			return
+			return nil
 		case <-ticker.C:
 			if err := sendHostInfoData(conn); err != nil {
 				log.Printf("WebSocket write error: %v", err)
-				return
+				return nil
 			}
 		}
 	}
@@ -273,18 +266,18 @@ func sendHostInfoData(conn *websocket.Conn) error {
 	return conn.WriteJSON(metrics)
 }
 
-func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	containerID := vars["id"]
+func containerLogsWebSocketHandler(c echo.Context) error {
+	containerID := c.Param("id")
 	if containerID == "" {
-		http.Error(w, "Container ID is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Container ID is required")
 	}
 
+	w := c.Response().Writer
+	r := c.Request()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -325,21 +318,21 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed to create request: %v", err)
 		conn.WriteJSON(map[string]string{"error": "Failed to create request"})
-		return
+		return nil
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to get logs: %v", err)
 		conn.WriteJSON(map[string]string{"error": "Failed to get logs: " + err.Error()})
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("Docker API returned status %d", resp.StatusCode)
-		conn.WriteJSON(map[string]string{"error": "Docker API returned status " + string(rune(resp.StatusCode))})
-		return
+		conn.WriteJSON(map[string]string{"error": "Docker API returned status " + strconv.Itoa(resp.StatusCode)})
+		return nil
 	}
 
 	// Docker API возвращает логи в формате: [8 байт заголовка][данные]
@@ -349,7 +342,7 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-done:
-			return
+			return nil
 		default:
 		}
 
@@ -385,7 +378,7 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			n, err := resp.Body.Read(data[read:])
 			if err != nil && err != io.EOF {
 				log.Printf("Error reading log data: %v", err)
-				return
+				return nil
 			}
 			if n == 0 {
 				break
@@ -397,29 +390,28 @@ func containerLogsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		logLine := string(data[:read])
 		if err := conn.WriteJSON(map[string]string{"log": logLine}); err != nil {
 			log.Printf("WebSocket write error: %v", err)
-			return
+			return nil
 		}
 	}
+	return nil
 }
 
-func containerRestartWebSocketHandler(w http.ResponseWriter, r *http.Request) {
-	// Проверяем что функция включена
+func containerRestartWebSocketHandler(c echo.Context) error {
 	if !getContainerRestart() {
-		http.Error(w, "Container restart is disabled", http.StatusForbidden)
-		return
+		return echo.NewHTTPError(http.StatusForbidden, "Container restart is disabled")
 	}
 
-	vars := mux.Vars(r)
-	containerID := vars["id"]
+	containerID := c.Param("id")
 	if containerID == "" {
-		http.Error(w, "Container ID is required", http.StatusBadRequest)
-		return
+		return echo.NewHTTPError(http.StatusBadRequest, "Container ID is required")
 	}
 
+	w := c.Response().Writer
+	r := c.Request()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -447,21 +439,21 @@ func containerRestartWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed to create request: %v", err)
 		conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to create request: " + err.Error()})
-		return
+		return nil
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to restart container: %v", err)
 		conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to restart container: " + err.Error()})
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 
 	// Docker API возвращает 204 No Content при успешном перезапуске
 	if resp.StatusCode == http.StatusNoContent {
 		conn.WriteJSON(map[string]string{"status": "success", "message": "Container restarted successfully"})
-		return
+		return nil
 	}
 
 	// Читаем тело ответа для получения деталей ошибки
@@ -469,18 +461,21 @@ func containerRestartWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed to read error response: %v", err)
 		conn.WriteJSON(map[string]string{"status": "error", "message": "Docker API returned status " + strconv.Itoa(resp.StatusCode)})
-		return
+		return nil
 	}
 
 	log.Printf("Docker API returned status %d: %s", resp.StatusCode, string(body))
 	conn.WriteJSON(map[string]string{"status": "error", "message": "Failed to restart container: " + string(body)})
+	return nil
 }
 
-func containersStatsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
+func containersStatsWebSocketHandler(c echo.Context) error {
+	w := c.Response().Writer
+	r := c.Request()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -506,11 +501,11 @@ func containersStatsWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-done:
-			return
+			return nil
 		case <-ticker.C:
 			if err := sendContainersStatsData(conn); err != nil {
 				log.Printf("WebSocket write error: %v", err)
-				return
+				return nil
 			}
 		}
 	}
