@@ -1,1 +1,5 @@
 .env
+server
+web/node_modules
+web/dist
+web/public/assets

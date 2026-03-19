@@ -10,7 +10,8 @@ ARG VITE_APP_VERSION
 ENV VITE_APP_VERSION=${VITE_APP_VERSION:-0.0.0}
 WORKDIR /app
 COPY web/package.json web/bun.lock* ./
-RUN bun install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile
 COPY web/ ./
 RUN bun run build
 

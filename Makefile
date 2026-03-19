@@ -6,6 +6,7 @@ BUN_CMD = bun
 DOCKER_CMD = docker
 COMPOSE_CMD = docker-compose
 PORT ?= 8080
+VERSION ?= latest
 BINARY_NAME = server
 WEB_DIR = web
 BUILD_DIR = build
@@ -54,9 +55,9 @@ run: build ## Запустить собранный проект
 	@echo "$(GREEN)Запуск проекта на порту $(PORT)...$(NC)"
 	PORT=$(PORT) ./$(BINARY_NAME)
 
-docker-build: ## Собрать Docker образ
+docker-build: ## Собрать Docker образ (VERSION=v0.10.0 для версии в дашборде)
 	@echo "$(GREEN)Сборка Docker образа...$(NC)"
-	$(DOCKER_CMD) build -f $(BUILD_DIR)/Dockerfile -t avt0x/docker-dashboard:latest .
+	$(DOCKER_CMD) build -f $(BUILD_DIR)/Dockerfile --build-arg VITE_APP_VERSION=$(VERSION) -t avt0x/docker-dashboard:$(VERSION) .
 
 docker-run: ## Запустить проект через Docker Compose
 	@echo "$(GREEN)Запуск через Docker Compose...$(NC)"

@@ -1,0 +1,20 @@
+# Dependencies and build artifacts
+web/node_modules
+**/node_modules
+server
+
+# Git and IDE
+.git
+.gitignore
+.cursor
+*.md
+
+# Env and local
+.env
+.env.*
+!.env.example
+
+# Misc
+**/*.log
+**/dist
+.DS_Store
